@@ -13,6 +13,7 @@ const CATEGORIAS = [
 const TIPOS_DE_FALLA = {
   sin_direccion: "Sin dirección real en el catálogo",
   pendiente_de_pedro: "Pendientes de una acción tuya",
+  vigilar_pagina: "Esperan el vigilante de páginas",
   sin_feed: "Sin feed",
   pagina_js: "Página armada en el navegador y sin feed",
   robots: "robots.txt no permite recolectar",
