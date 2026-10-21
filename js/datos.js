@@ -52,10 +52,10 @@ function pedir(ruta) {
   if (modoLocal()) return fetch(`../${ruta}`, { cache: "no-store" });
   const { token, repo } = config();
   return fetch(`https://api.github.com/repos/${repo}/contents/${encodeURI(ruta)}`, {
+    // Solo encabezados que GitHub autoriza desde el navegador (CORS).
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/vnd.github.raw+json",
-      "X-GitHub-Api-Version": "2022-11-28",
     },
     cache: "no-store",
   });
