@@ -28,7 +28,7 @@ export function separarFicha(texto) {
 }
 
 const ENLACE = /\[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)(?:\s+&quot;.*?&quot;)?\)/g;
-const ES_URL_SEGURA = /^(https?:|mailto:)/i;
+const ES_URL_SEGURA = /^(https?:|mailto:|#\/)/i;
 
 function enfasis(texto) {
   return texto
@@ -45,10 +45,13 @@ function enLinea(crudo) {
   let texto = crudo
     .replace(/\\([!-/:-@[-`{-~])/g, (_, c) => guardar(escapar(c)))
     .replace(/`([^`]+)`/g, (_, c) => guardar(`<code>${escapar(c)}</code>`));
-  texto = escapar(texto).replace(ENLACE, (_, etiqueta, url) =>
-    ES_URL_SEGURA.test(url)
-      ? guardar(`<a href="${url}" target="_blank" rel="noopener noreferrer">${enfasis(etiqueta)}</a>`)
-      : etiqueta);
+  // Los enlaces "#/…" llevan a otra vista de Mentor (por ejemplo, al lector) y
+  // se abren en la misma pestaña; los demás salen a otro sitio.
+  texto = escapar(texto).replace(ENLACE, (_, etiqueta, url) => {
+    if (!ES_URL_SEGURA.test(url)) return etiqueta;
+    const externo = url.startsWith("#/") ? "" : ' target="_blank" rel="noopener noreferrer"';
+    return guardar(`<a href="${url}"${externo}>${enfasis(etiqueta)}</a>`);
+  });
   return enfasis(texto).replace(/\u0000(\d+)\u0000/g, (_, i) => piezas[Number(i)]);
 }
 

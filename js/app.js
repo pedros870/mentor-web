@@ -109,12 +109,94 @@ function itemArticulo(a) {
   </a></li>`;
 }
 
-// ---------- Hoy ----------
+// ---------- Hoy: el resumen de la mañana ----------
+
+const RECOMENDACIONES = { leer: "Leer completo", resumen: "Basta el resumen", saltar: "Saltar" };
+const ORDEN_RECOMENDACION = { leer: 0, resumen: 1, saltar: 2 };
+
+async function leerResumen() {
+  try {
+    const puntero = await leerJSON("datos/resumenes/ultimo.json");
+    return await leerJSON(puntero.json);
+  } catch (error) {
+    if (error instanceof ErrorDeDatos && error.estado === 404) return null;
+    throw error;
+  }
+}
+
+function itemTitular(t) {
+  return html`<li><a class="articulo" href="${enlaceLector(t)}">
+    <span class="articulo-titulo">${t.titulo}</span>
+    <span class="meta"><span class="insignia insignia-${t.recomendacion}">${RECOMENDACIONES[t.recomendacion]}</span> ${t.fuente} · ${t.minutos} min</span>
+    <span class="razon">${t.razon}</span>
+  </a></li>`;
+}
+
+function pintarResumen(r) {
+  const porCategoria = agrupar(r.titulares, (t) => t.categoria);
+  const categorias = CATEGORIAS.filter((c) => porCategoria.has(c));
+  const orden = (a, b) => ORDEN_RECOMENDACION[a.recomendacion] - ORDEN_RECOMENDACION[b.recomendacion]
+    || b.relevancia - a.relevancia;
+  pintar(html`
+    <header class="encabezado-vista">
+      <p class="sobretitulo">Resumen del ${fechaLarga(r.fecha)}</p>
+      <h1>Hoy</h1>
+      <p class="meta">Escrito por Claude · unos ${r.minutos} min de lectura · ${numero(r.ventana.articulos)} artículos revisados</p>
+    </header>
+    ${r.aviso_noche ? html`<p class="aviso-noche">${r.aviso_noche}</p>` : ""}
+    ${r.nota ? html`<p class="nota">${r.nota}</p>` : ""}
+    ${r.lecturas_del_dia.length ? html`<section class="lecturas-del-dia">
+      <h2>Las lecturas del día</h2>
+      ${r.lecturas_del_dia.map((l) => html`<a class="tarjeta lectura-del-dia" href="${enlaceLector(l)}">
+        <span class="sobretitulo">${l.fuente} · ${l.minutos} min</span>
+        <span class="articulo-titulo">${l.titulo}</span>
+        <span class="meta">${l.por_que}</span>
+      </a>`)}
+    </section>` : ""}
+    ${r.categorias.map((c) => html`<section class="categoria-resumen">
+      <h2>${c.nombre}</h2>
+      <div class="cuerpo cuerpo-resumen">${seguro(markdownAHtml(c.texto))}</div>
+    </section>`)}
+    <section class="titulares">
+      <h2>Titulares</h2>
+      <p class="nota">Todo lo revisado, con la recomendación de Claude. Lo que conviene saltar queda plegado.</p>
+      ${categorias.map((c) => {
+        const lista = porCategoria.get(c);
+        const destacados = lista.filter((t) => t.recomendacion !== "saltar").sort(orden);
+        const saltar = lista.filter((t) => t.recomendacion === "saltar").sort(orden);
+        return html`<details class="grupo-titulares">
+          <summary>${c} <span class="cuenta">${destacados.length} de ${lista.length}</span></summary>
+          <ul class="lista-articulos">${destacados.map(itemTitular)}</ul>
+          ${saltar.length ? html`<button class="boton-texto" type="button" data-saltos>Ver ${saltar.length} para saltar</button>
+            <ul class="lista-articulos" hidden>${saltar.map(itemTitular)}</ul>` : ""}
+        </details>`;
+      })}
+    </section>
+    <section class="tarjeta">
+      <h2>Pedir un resumen nuevo</h2>
+      <p class="meta">El botón se activa cuando conectemos la API de Claude: entonces el resumen se escribe solo, desde lo último que leíste.</p>
+      <button class="boton" type="button" disabled>Pedir resumen</button>
+    </section>
+  `);
+  contenido.onclick = (evento) => {
+    const boton = evento.target.closest("[data-saltos]");
+    if (!boton) return;
+    boton.nextElementSibling.hidden = false;
+    boton.remove();
+  };
+}
+
+// ---------- Hoy sin resumen: los titulares recolectados ----------
 
 const estadoHoy = { filtro: "todas", abiertas: new Set() };
 const VISIBLES_POR_CATEGORIA = 6;
 
 async function vistaHoy() {
+  const resumen = await leerResumen();
+  if (resumen) {
+    pintarResumen(resumen);
+    return;
+  }
   const { ultima, articulos } = await ultimaRecoleccion();
   const porCategoria = agrupar(
     [...articulos].sort((a, b) => (b.fecha_publicacion || "").localeCompare(a.fecha_publicacion || "")),

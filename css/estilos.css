@@ -320,6 +320,45 @@ main:focus { outline: none; }
 .insignia-aviso { background: var(--aviso-fondo); border-color: transparent; color: var(--aviso); }
 .insignia-acento { background: var(--acento-suave); border-color: transparent; color: var(--acento); }
 
+/* ---------- Resumen de la mañana ---------- */
+
+.aviso-noche {
+  background: var(--acento-suave);
+  color: var(--texto);
+  border-left: 4px solid var(--acento);
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+  font-family: var(--serif);
+  font-size: 1.05rem;
+}
+
+.lecturas-del-dia { margin: 1.5rem 0 2rem; }
+
+.lectura-del-dia {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  color: var(--texto);
+  text-decoration: none;
+  border-left: 4px solid var(--acento);
+}
+
+.lectura-del-dia:hover .articulo-titulo { color: var(--acento); }
+.lectura-del-dia .articulo-titulo { font-size: 1.15rem; }
+
+.categoria-resumen { margin: 2rem 0; }
+.categoria-resumen h2 { font-size: 1.35rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--borde); }
+.cuerpo-resumen { font-size: 1.08rem; }
+
+.titulares { margin: 2.5rem 0 1.5rem; }
+.grupo-titulares summary { font-family: var(--serif); font-size: 1.1rem; padding: 0.3rem 0; }
+.grupo-titulares .lista-articulos { margin-top: 0.5rem; }
+
+.razon { color: var(--texto-suave); font-size: 0.85rem; font-style: italic; }
+.insignia-leer { background: var(--acento); border-color: transparent; color: var(--acento-texto); margin-left: 0; }
+.insignia-resumen { background: var(--acento-suave); border-color: transparent; color: var(--acento); margin-left: 0; }
+.insignia-saltar { margin-left: 0; }
+
 /* ---------- Lector ---------- */
 
 .lector { max-width: 40rem; margin: 0 auto; }
