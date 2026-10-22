@@ -348,6 +348,9 @@ main:focus { outline: none; }
   margin: 0 0 1.25rem;
 }
 
+a.aviso-noche { display: block; text-decoration: none; }
+.leer-ahora { color: var(--acento); font-weight: 600; white-space: nowrap; }
+
 .lecturas-del-dia { margin: 0 0 1.5rem; }
 .lecturas-del-dia h2 { font-size: 1rem; font-family: var(--sans); color: var(--texto-suave); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
 

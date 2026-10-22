@@ -260,7 +260,9 @@ function pintarResumen(r, lectura) {
         <span class="meta">${listas === r.categorias.length ? "Todo listo" : `${listas} de ${r.categorias.length} listas`} · unos ${r.minutos} min</span>
       </div>
     </header>
-    ${r.aviso_noche ? html`<p class="aviso-noche">${r.aviso_noche}</p>` : ""}
+    ${r.aviso_noche ? (r.aviso_noche_archivo
+      ? html`<a class="aviso-noche" href="${enlaceLector({ archivo: r.aviso_noche_archivo })}">${marcaDeLeido(lectura, r.aviso_noche_archivo)}${r.aviso_noche} <span class="leer-ahora">Leer →</span></a>`
+      : html`<p class="aviso-noche">${r.aviso_noche}</p>`) : ""}
     ${r.lecturas_del_dia.length ? html`<section class="lecturas-del-dia">
       <h2>Para leer completo</h2>
       <ul class="lista-compacta">${r.lecturas_del_dia.map((l) => html`<li><a href="${enlaceLector(l)}">
@@ -403,7 +405,8 @@ async function vistaLector(ruta) {
   const clasificacion = resumen?.titulares.find((t) => t.archivo === ruta);
   // Lo que el sistema recomendó leer completo se califica con "¿valió la pena?"
   // (mide si acierta); lo demás, con "¿te sirvió?" (mide lo que se está perdiendo).
-  const recomendada = resumen?.lecturas_del_dia.some((l) => l.archivo === ruta) || clasificacion?.recomendacion === "leer";
+  const recomendada = resumen?.lecturas_del_dia.some((l) => l.archivo === ruta)
+    || resumen?.aviso_noche_archivo === ruta || clasificacion?.recomendacion === "leer";
   const pregunta = recomendada ? "valio_la_pena" : "te_sirvio";
   const calificacion = lectura.calificaciones.get(ruta);
   const leido = lectura.leidos.has(ruta);
