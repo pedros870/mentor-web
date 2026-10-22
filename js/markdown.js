@@ -39,7 +39,7 @@ function enfasis(texto) {
 }
 
 // Formato dentro de una línea: escapes, código, enlaces, negrita y cursiva.
-function enLinea(crudo) {
+export function enLinea(crudo) {
   const piezas = [];
   const guardar = (html) => `\u0000${piezas.push(html) - 1}\u0000`;
   let texto = crudo
