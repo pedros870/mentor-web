@@ -212,7 +212,7 @@ function itemTitular(t, lectura) {
   </a></li>`;
 }
 
-function pintarResumen(r, lectura) {
+function pintarResumen(r, lectura, aviso) {
   const estaLista = (categoria) => lectura.listas.get(`${r.fecha}|${categoria}`) === true;
   const listas = r.categorias.filter((c) => estaLista(c.nombre)).length;
   const porCategoria = agrupar(r.titulares, (t) => t.categoria);
@@ -301,6 +301,7 @@ function pintarResumen(r, lectura) {
         <span class="meta">${listas === r.categorias.length ? "Todo listo" : `${listas} de ${r.categorias.length} listas`} · unos ${r.minutos} min</span>
       </div>
     </header>
+    ${aviso && aviso.generado > r.generado ? html`<p class="aviso">${aviso.texto}</p>` : ""}
     ${r.aviso_noche ? (r.aviso_noche_archivo
       ? html`<a class="aviso-noche" href="${enlaceLector({ archivo: r.aviso_noche_archivo })}">${marcaDeLeido(lectura, r.aviso_noche_archivo)}${r.aviso_noche} <span class="leer-ahora">Leer →</span></a>`
       : html`<p class="aviso-noche">${r.aviso_noche}</p>`) : ""}
@@ -378,7 +379,9 @@ async function vistaHoy(categoria) {
   if (categoria) estadoResumen.abierta = categoria; // #/hoy/<categoría> abre esa sección
   const resumen = await leerResumen();
   if (resumen) {
-    pintarResumen(resumen, await estadoDeLectura());
+    // Si el último intento no pudo escribir resumen (por ejemplo, sin créditos), se avisa.
+    const aviso = await leerJSON("datos/resumenes/aviso.json").catch(() => null);
+    pintarResumen(resumen, await estadoDeLectura(), aviso);
     return;
   }
   const { ultima, articulos } = await ultimaRecoleccion();
@@ -893,7 +896,10 @@ async function vistaVocabulario() {
 
 async function vistaEstado() {
   const { ultima, indice, articulos } = await ultimaRecoleccion();
-  const [registroFallas, feeds] = await Promise.all([leerJSON(ultima.fallas), leerJSON("catalogo/feeds.json")]);
+  const mes = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date()).slice(0, 7);
+  const [registroFallas, feeds, costos] = await Promise.all([
+    leerJSON(ultima.fallas), leerJSON("catalogo/feeds.json"), leerJSON(`datos/costos/${mes}.json`).catch(() => null),
+  ]);
   const corrida = indice.corridas.at(-1);
   const fallas = registroFallas.corridas.at(-1).fallas;
   const porTipo = agrupar(fallas, (f) => f.tipo);
@@ -920,7 +926,13 @@ async function vistaEstado() {
     </section>
     <section class="tarjeta">
       <h2>Costos del mes</h2>
-      <p>Cero: Claude todavía no se usa. El consumo aparece aquí desde la etapa 2.</p>
+      ${costos
+        ? html`<p><strong>${costos.total_usd.toLocaleString("es-CO", { style: "currency", currency: "USD" })}</strong>
+            de ${(costos.tope_usd || 95).toLocaleString("es-CO", { style: "currency", currency: "USD" })} de créditos ·
+            ${numero(costos.llamadas)} llamadas a Claude</p>
+          <progress class="gasto" max="${costos.tope_usd || 95}" value="${costos.total_usd}"></progress>
+          <p class="meta">Se paga con los créditos mensuales de tu plan Max. Si llega al tope, el resumen se detiene y la recolección sigue.</p>`
+        : html`<p>Sin consumo este mes.</p>`}
     </section>
     <section class="tarjeta">
       <h2>Fuentes con falla <span class="cuenta">${fallas.length}</span></h2>

@@ -424,6 +424,11 @@ a.aviso-noche { display: block; text-decoration: none; }
 .insignia-resumen { background: var(--acento-suave); border-color: transparent; color: var(--acento); margin-left: 0; }
 .insignia-saltar { margin-left: 0; }
 
+progress.gasto { width: 100%; height: 0.5rem; appearance: none; border: 0; border-radius: 999px; background: var(--borde); overflow: hidden; }
+progress.gasto::-webkit-progress-bar { background: var(--borde); border-radius: 999px; }
+progress.gasto::-webkit-progress-value { background: var(--acento); border-radius: 999px; }
+progress.gasto::-moz-progress-bar { background: var(--acento); border-radius: 999px; }
+
 /* ---------- Fuentes ---------- */
 
 .segmentos { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; padding: 0.25rem; margin: 0 0 1rem; background: var(--superficie); border: 1px solid var(--borde); border-radius: 12px; }
