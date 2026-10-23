@@ -249,19 +249,41 @@ function pintarResumen(r, lectura) {
       </div>`;
   };
 
+  // Formato 3 (desde el 23 de octubre): por tema, hallazgos que sintetizan lo
+  // encontrado; los artículos de cada hallazgo quedan plegados para profundizar.
+  const cuerpoHallazgos = (c) => {
+    const preferencia = lectura.preferencias.get(`${r.fecha}|${c.nombre}|`);
+    return html`${c.hallazgos.map((h) => html`<div class="hallazgo">
+        <div class="cuerpo cuerpo-resumen">${seguro(markdownAHtml(h.texto))}</div>
+        <details class="profundizar">
+          <summary>${h.articulos.length === 1 ? "1 artículo" : `${h.articulos.length} artículos`} para profundizar</summary>
+          <ul class="lista-compacta">${h.articulos.map((a) => html`<li><a href="${enlaceLector(a)}">
+            <span class="articulo-titulo">${marcaDeLeido(lectura, a.archivo)}${a.titulo}</span>
+            <span class="meta">${a.fuente} · ${a.minutos} min</span>
+          </a></li>`)}</ul>
+        </details>
+      </div>`)}
+      <div class="preferencias" data-categoria="${c.nombre}" data-tema="">
+        <button class="chip" type="button" data-preferencia="mas" aria-pressed="${String(preferencia === "mas")}">Más de esto</button>
+        <button class="chip" type="button" data-preferencia="menos" aria-pressed="${String(preferencia === "menos")}">Menos de esto</button>
+      </div>`;
+  };
+
   const seccion = (c) => {
-    const corrido = Array.isArray(c.articulos);
-    const grupos = corrido ? [] : temasDeSeccion(c.texto);
+    const hallazgos = Array.isArray(c.hallazgos);
+    const corrido = !hallazgos && Array.isArray(c.articulos);
+    const grupos = hallazgos || corrido ? [] : temasDeSeccion(c.texto);
     const lista = estaLista(c.nombre);
-    const cuenta = corrido ? c.articulos.length : grupos.reduce((n, g) => n + g.temas.length, 0);
-    const unidad = corrido ? (cuenta === 1 ? "noticia" : "noticias") : (cuenta === 1 ? "tema" : "temas");
+    const cuenta = hallazgos ? c.hallazgos.length : corrido ? c.articulos.length : grupos.reduce((n, g) => n + g.temas.length, 0);
+    const unidad = hallazgos ? (cuenta === 1 ? "hallazgo" : "hallazgos")
+      : corrido ? (cuenta === 1 ? "noticia" : "noticias") : (cuenta === 1 ? "tema" : "temas");
     return html`<details class="seccion${lista ? " lista" : ""}" name="secciones" data-categoria="${c.nombre}" ${estadoResumen.abierta === c.nombre ? "open" : ""}>
       <summary>
         <span class="seccion-titulo">${lista ? "✓ " : ""}${c.nombre}</span>
         <span class="meta">${cuenta} ${unidad}</span>
       </summary>
       <div class="seccion-cuerpo">
-        ${corrido ? cuerpoCorrido(c)
+        ${hallazgos ? cuerpoHallazgos(c) : corrido ? cuerpoCorrido(c)
           : grupos.map((g) => html`${g.titulo ? html`<h3 class="grupo">${g.titulo}</h3>` : ""}<ul class="temas">${g.temas.map((t) => tema(c, t))}</ul>`)}
         <div class="acciones">
           <button class="boton" type="button" data-lista="${c.nombre}">${lista ? "Volver a pendiente" : "Listo"}</button>
@@ -488,13 +510,10 @@ async function vistaLector(ruta) {
   });
 }
 
-// ---------- Fuentes: el catálogo de Pedro, por el canal en que puso cada una ----------
+// ---------- Fuentes: el catálogo de Pedro, por tema y con su estado ----------
 
-const ORDEN_CANALES = [
-  "Resumen de IA", "Resumen de capital y señales", "Resumen de ciencia, economía y mundo", "Resumen cultural",
-  "Resumen de tus sectores", "Resumen de avances técnicos", "Feedly diario", "Feedly semanal", "Feedly mensual",
-  "Consulta", "Fuera",
-];
+const TEMAS_DE_FUENTE = [...CATEGORIAS, "Varios temas"];
+const ESTADOS = { resume: "Se resume", consulta: "Consulta", fuera: "Fuera" };
 const estadoFuentes = { filtro: "todas", buscar: "", abiertos: new Set() };
 
 function pestanasDeFuentes(activa) {
@@ -504,18 +523,17 @@ function pestanasDeFuentes(activa) {
   </div>`;
 }
 
-// Cómo está hoy cada fuente: se recolecta, es de consulta, espera algo o falla.
-function estadoDeFuente(f, ajuste, falla, articulos) {
-  if (f.canal_final === "Fuera") return { clase: "fuera", texto: "Fuera: la descartaste" };
-  if (!f.recolectar) return { clase: "consulta", texto: "De consulta: no se recolecta" };
-  if (ajuste.recolectar === false) {
-    return ajuste.motivo === "inactiva" ? { clase: "fuera", texto: "Archivada: dejó de publicar" }
-      : { clase: "consulta", texto: "Pasó a consulta" };
+// Cómo está hoy cada fuente: se resume, es de consulta, está fuera, espera algo o falla.
+function situacionDeFuente(f, ajuste, falla, articulos) {
+  if (f.estado === "fuera") {
+    return { clase: "fuera", texto: ajuste.motivo === "inactiva" ? "Fuera: dejó de publicar" : "Fuera" };
   }
+  if (f.estado === "consulta") return { clase: "consulta", texto: "De consulta: no se recolecta" };
+  if (f.pendiente_de_aplicar) return { clase: "pendiente", texto: "Cambio tuyo: se aplica en la próxima recolección" };
   if (ajuste.pendiente) return { clase: "pendiente", texto: ajuste.pendiente };
   if (ajuste.espera) return { clase: "pendiente", texto: "Espera el vigilante de páginas" };
-  if (falla) return { clase: "problema", texto: `${TIPOS_DE_FALLA[falla.tipo] || falla.tipo}` };
-  return { clase: "recolecta", texto: articulos ? `Se recolecta · ${articulos} en la última recolección` : "Se recolecta" };
+  if (falla) return { clase: "problema", texto: TIPOS_DE_FALLA[falla.tipo] || falla.tipo };
+  return { clase: "resume", texto: articulos ? `Se resume · ${articulos} en la última recolección` : "Se resume" };
 }
 
 async function vistaFuentes(subvista) {
@@ -523,76 +541,103 @@ async function vistaFuentes(subvista) {
     await vistaClasificacion();
     return;
   }
-  if (subvista?.startsWith("canal/")) estadoFuentes.abiertos.add(subvista.slice(6)); // #/fuentes/canal/<canal>
-  const [{ fuentes }, ajustes, { ultima, articulos }, consolidadas, marcas] = await Promise.all([
-    leerJSON("catalogo/fuentes.json"), leerJSON("catalogo/ajustes.json"), ultimaRecoleccion(),
-    leerJSON("catalogo/reclasificaciones.json").catch(() => ({ fuentes: {} })), todasLasMarcas(),
+  if (subvista?.startsWith("tema/")) estadoFuentes.abiertos.add(subvista.slice(5)); // #/fuentes/tema/<tema>
+  const [catalogo, agregadas, clasificacion, ajustes, { ultima, articulos }, consolidadas, marcas] = await Promise.all([
+    leerJSON("catalogo/fuentes.json"),
+    leerJSON("catalogo/fuentes_agregadas.json").catch(() => ({ fuentes: [] })),
+    leerJSON("catalogo/clasificacion_fuentes.json").catch(() => ({ fuentes: {} })),
+    leerJSON("catalogo/ajustes.json"),
+    ultimaRecoleccion(),
+    leerJSON("catalogo/reclasificaciones.json").catch(() => ({ fuentes: {} })),
+    todasLasMarcas(),
   ]);
+  const fuentes = [...catalogo.fuentes, ...agregadas.fuentes];
   const fallas = new Map((await leerJSON(ultima.fallas)).corridas.at(-1).fallas.map((f) => [f.fuente_id, f]));
   const porFuente = new Map();
   for (const a of articulos) porFuente.set(a.fuente_id, (porFuente.get(a.fuente_id) || 0) + 1);
 
-  // Los cambios de canal de Pedro: los ya consolidados por el recolector y los
-  // recientes que aún esperan la próxima recolección. Manda el último.
-  const cambios = new Map(Object.entries(consolidadas.fuentes).map(([id, c]) => [id, { ...c, aplicado: true }]));
+  // Los cambios de Pedro: los ya aplicados por el recolector y los recientes que
+  // esperan la próxima recolección. Por cada campo manda el último.
+  const cambios = new Map(Object.entries(consolidadas.fuentes).map(([id, c]) => [id, { ...c }]));
+  const pendientes = new Set();
   for (const m of marcas) {
-    if (m.tipo === "fuente" && m.campo === "canal" && (!cambios.has(m.fuente_id) || cambios.get(m.fuente_id).fecha < m.ts)) {
-      cambios.set(m.fuente_id, { canal: m.valor, anterior: m.anterior, fecha: m.ts, aplicado: false });
+    if (m.tipo !== "fuente" || !["estado", "tema"].includes(m.campo)) continue;
+    const actual = cambios.get(m.fuente_id) || {};
+    if ((actual[`fecha_${m.campo}`] || "") < m.ts) {
+      cambios.set(m.fuente_id, { ...actual, [m.campo]: m.valor, [`fecha_${m.campo}`]: m.ts });
+      pendientes.add(m.fuente_id);
     }
   }
+  for (const [id, c] of Object.entries(consolidadas.fuentes)) {
+    const reciente = cambios.get(id);
+    if (reciente.fecha_estado === c.fecha_estado && reciente.fecha_tema === c.fecha_tema) pendientes.delete(id);
+  }
+
   const armar = (f) => {
+    const base = clasificacion.fuentes[f.id] || { estado: f.recolectar ? "resume" : "consulta", tema: f.categoria_inicial || "Varios temas", tema_segun: "catálogo" };
+    const cambio = cambios.get(f.id) || {};
     const ajuste = ajustes.fuentes[f.id] || {};
-    const cambio = cambios.get(f.id);
-    const efectiva = cambio ? { ...f, canal_final: cambio.canal, recolectar: !["Consulta", "Fuera"].includes(cambio.canal) } : f;
-    let estado = estadoDeFuente(efectiva, cambio && efectiva.recolectar ? {} : ajuste, fallas.get(f.id), porFuente.get(f.id));
-    if (cambio && !cambio.aplicado) {
-      estado = { clase: "pendiente", texto: `La moviste a "${cambio.canal}": se aplica en la próxima recolección` };
-    }
-    return { ...efectiva, original: f.canal_final, cambio, enlace: ajuste.url || f.url, estado };
+    const fuente = {
+      ...f,
+      estado: cambio.estado || base.estado,
+      tema: cambio.tema || base.tema,
+      tema_segun: cambio.tema ? "tú" : base.tema_segun,
+      pendiente_de_aplicar: pendientes.has(f.id),
+      enlace: ajuste.url || f.url,
+    };
+    fuente.situacion = situacionDeFuente(fuente, cambio.estado === "resume" ? {} : ajuste, fallas.get(f.id), porFuente.get(f.id));
+    return fuente;
   };
   let lista = fuentes.map(armar);
-  const cuenta = (clase) => lista.filter((f) => f.estado.clase === clase).length;
+  const cuenta = (filtro) => lista.filter((f) => coincideFiltro(f, filtro)).length;
+  function coincideFiltro(f, filtro) {
+    if (filtro === "todas") return true;
+    if (filtro === "problema") return f.estado === "resume" && ["pendiente", "problema"].includes(f.situacion.clase);
+    return f.estado === filtro;
+  }
+
+  const segun = (f) => f.tema_segun === "tú" ? "lo elegiste tú"
+    : f.tema_segun?.startsWith("articulos") ? `según sus artículos ${f.tema_segun.replace("articulos ", "")}`
+      : "según su descripción";
 
   const tarjeta = (f) => html`<li class="fuente">
     <a class="articulo-titulo" href="${f.enlace}" target="_blank" rel="noopener noreferrer">${f.nombre} ↗</a>
     ${f.autor_o_responsable && f.autor_o_responsable !== f.nombre ? html`<span class="meta">${f.autor_o_responsable}</span>` : ""}
     ${f.que_es ? html`<p class="por-que">${f.que_es}</p>` : ""}
     ${f.nota_de_pedro ? html`<p class="nota-pedro"><strong>Tu nota:</strong> ${f.nota_de_pedro}</p>` : ""}
-    ${f.resolucion ? html`<p class="meta"><strong>Cómo quedó:</strong> ${f.resolucion}</p>` : ""}
-    <span class="insignias">
-      ${f.categoria_inicial ? html`<span class="insignia insignia-acento">${f.categoria_inicial}${f.subsector ? ` · ${f.subsector}` : ""}</span>` : ""}
-      <span class="insignia">${f.hoja_origen}</span>
-      ${f.canal_elegido_por_pedro && f.canal_elegido_por_pedro !== f.canal_propuesto_por_claude
-        ? html`<span class="insignia">Cambiaste: ${f.canal_propuesto_por_claude} → ${f.canal_elegido_por_pedro}</span>` : ""}
-    </span>
-    <span class="estado-fuente estado-${f.estado.clase}">${f.estado.texto}</span>
-    <label class="reclasificar">Canal
-      <select data-fuente="${f.id}">
-        ${ORDEN_CANALES.map((c) => html`<option value="${c}" ${c === f.canal_final ? "selected" : ""}>${c}</option>`)}
-      </select>
-    </label>
+    <span class="estado-fuente estado-${f.situacion.clase}">${f.situacion.texto}</span>
+    <div class="reclasificar">
+      <label>Estado
+        <select data-fuente="${f.id}" data-campo="estado">
+          ${Object.entries(ESTADOS).map(([clave, nombre]) => html`<option value="${clave}" ${clave === f.estado ? "selected" : ""}>${nombre}</option>`)}
+        </select>
+      </label>
+      <label>Tema
+        <select data-fuente="${f.id}" data-campo="tema">
+          ${TEMAS_DE_FUENTE.map((t) => html`<option value="${t}" ${t === f.tema ? "selected" : ""}>${t}</option>`)}
+        </select>
+      </label>
+    </div>
+    <span class="meta">Tema ${segun(f)}${f.subsector ? ` · sector: ${f.subsector}` : ""}${f.agregada ? " · agregada en Mentor" : ""}</span>
   </li>`;
 
   const dibujarLista = () => {
     const consulta = sinTildes(estadoFuentes.buscar);
-    const elegidas = lista.filter((f) =>
-      (estadoFuentes.filtro === "todas" || f.estado.clase === estadoFuentes.filtro
-        || (estadoFuentes.filtro === "pendiente" && f.estado.clase === "problema"))
+    const elegidas = lista.filter((f) => coincideFiltro(f, estadoFuentes.filtro)
       && (!consulta || sinTildes(`${f.nombre} ${f.autor_o_responsable} ${f.que_es} ${(f.etiquetas || []).join(" ")}`).includes(consulta)));
-    const grupos = agrupar(elegidas, (f) => f.canal_final || "Sin canal");
-    const canales = [...ORDEN_CANALES.filter((c) => grupos.has(c)), ...[...grupos.keys()].filter((c) => !ORDEN_CANALES.includes(c))];
+    const grupos = agrupar(elegidas, (f) => f.tema);
+    const temas = TEMAS_DE_FUENTE.filter((t) => grupos.has(t));
     pintar(html`
       <p class="meta">${numero(elegidas.length)} ${elegidas.length === 1 ? "fuente" : "fuentes"}</p>
-      ${canales.map((canal) => html`<details class="grupo-fuentes" data-canal="${canal}" ${consulta || estadoFuentes.abiertos.has(canal) ? "open" : ""}>
-        <summary>${canal} <span class="cuenta">${grupos.get(canal).length}</span></summary>
-        <ul class="lista-fuentes">${grupos.get(canal).sort((a, b) => a.nombre.localeCompare(b.nombre, "es")).map(tarjeta)}</ul>
+      ${temas.map((tema) => html`<details class="grupo-fuentes" data-tema="${tema}" ${consulta || estadoFuentes.abiertos.has(tema) ? "open" : ""}>
+        <summary>${tema} <span class="cuenta">${grupos.get(tema).length}</span></summary>
+        <ul class="lista-fuentes">${grupos.get(tema).sort((a, b) => a.nombre.localeCompare(b.nombre, "es")).map(tarjeta)}</ul>
       </details>`)}
     `, document.getElementById("lista-fuentes"));
-    // Recordar qué canales quedaron abiertos al filtrar o volver a la vista.
     for (const grupo of contenido.querySelectorAll("details.grupo-fuentes")) {
       grupo.addEventListener("toggle", () => {
-        if (grupo.open) estadoFuentes.abiertos.add(grupo.dataset.canal);
-        else estadoFuentes.abiertos.delete(grupo.dataset.canal);
+        if (grupo.open) estadoFuentes.abiertos.add(grupo.dataset.tema);
+        else estadoFuentes.abiertos.delete(grupo.dataset.tema);
       });
     }
   };
@@ -601,14 +646,12 @@ async function vistaFuentes(subvista) {
     <header class="encabezado-vista">
       <p class="sobretitulo">Tu biblioteca</p>
       <h1>Fuentes</h1>
-      <p class="meta">Cada página, por qué vale la pena y en qué canal la pusiste.</p>
+      <p class="meta">Cada página por su tema: por qué vale la pena, si se resume y qué tal está funcionando. El tema de la fuente es una guía; en el resumen, cada artículo va al tema de su contenido.</p>
     </header>
     ${pestanasDeFuentes("fuentes")}
     <div class="chips" role="group" aria-label="Filtrar por estado">
-      ${[["todas", "Todas", lista.length], ["recolecta", "Se recolectan", cuenta("recolecta")],
-        ["pendiente", "Con pendiente o falla", cuenta("pendiente") + cuenta("problema")],
-        ["consulta", "De consulta", cuenta("consulta")], ["fuera", "Fuera", cuenta("fuera")]]
-        .map(([clave, nombre, n]) => html`<button class="chip" type="button" data-filtro-fuente="${clave}" aria-pressed="${String(estadoFuentes.filtro === clave)}">${nombre} <span>${n}</span></button>`)}
+      ${[["todas", "Todas"], ["resume", "Se resumen"], ["problema", "Con pendiente o falla"], ["consulta", "De consulta"], ["fuera", "Fuera"]]
+        .map(([clave, nombre]) => html`<button class="chip" type="button" data-filtro-fuente="${clave}" aria-pressed="${String(estadoFuentes.filtro === clave)}">${nombre} <span>${cuenta(clave)}</span></button>`)}
     </div>
     <label class="buscador"><span class="oculto">Buscar fuente</span>
       <input id="buscar-fuente" type="search" placeholder="Buscar por nombre, autor o tema" autocomplete="off" value="${estadoFuentes.buscar}">
@@ -631,12 +674,14 @@ async function vistaFuentes(subvista) {
     const selector = evento.target.closest("select[data-fuente]");
     if (!selector) return;
     const id = selector.dataset.fuente;
+    const campo = selector.dataset.campo;
     const actual = lista.find((f) => f.id === id);
-    const marca = marcar({ tipo: "fuente", campo: "canal", fuente_id: id, valor: selector.value, anterior: actual.canal_final });
-    cambios.set(id, { canal: selector.value, anterior: actual.canal_final, fecha: marca.ts, aplicado: false });
+    const marca = marcar({ tipo: "fuente", campo, fuente_id: id, valor: selector.value, anterior: actual[campo] });
+    cambios.set(id, { ...(cambios.get(id) || {}), [campo]: selector.value, [`fecha_${campo}`]: marca.ts });
+    pendientes.add(id);
     lista = fuentes.map(armar);
-    estadoFuentes.abiertos.add(selector.value);
-    avisar(`${actual.nombre}: ahora en "${selector.value}"`);
+    if (campo === "tema") estadoFuentes.abiertos.add(selector.value);
+    avisar(`${actual.nombre}: ${campo === "estado" ? ESTADOS[selector.value] : selector.value}`);
     dibujarLista();
   };
   dibujarLista();

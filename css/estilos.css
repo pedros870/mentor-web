@@ -401,6 +401,14 @@ a.aviso-noche { display: block; text-decoration: none; }
 .tema-detalle { padding: 0 0 0.8rem 1.5rem; font-family: var(--serif); font-size: 1rem; line-height: 1.6; }
 .tema-detalle p { margin: 0 0 0.6rem; }
 
+.hallazgo { padding: 0.25rem 0 0.75rem; border-bottom: 1px solid var(--borde); margin-bottom: 0.75rem; }
+.hallazgo .cuerpo-resumen p { margin-bottom: 0.4rem; }
+.profundizar > summary { list-style: none; cursor: pointer; font-size: 0.85rem; font-weight: 600; color: var(--acento); padding: 0.2rem 0; }
+.profundizar > summary::-webkit-details-marker { display: none; }
+.profundizar > summary::before { content: "+ "; }
+.profundizar[open] > summary::before { content: "− "; }
+.profundizar .lista-compacta { margin-top: 0.3rem; }
+
 .preferencias { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .preferencias .chip { font-size: 0.8rem; padding: 0.25rem 0.65rem; }
 
@@ -436,9 +444,10 @@ a.aviso-noche { display: block; text-decoration: none; }
 .nota-pedro { margin: 0.1rem 0; font-size: 0.88rem; background: var(--acento-suave); border-radius: 8px; padding: 0.4rem 0.6rem; }
 .estado-fuente { font-size: 0.82rem; font-weight: 600; }
 
-.reclasificar { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; font-size: 0.82rem; color: var(--texto-suave); }
+.reclasificar { display: grid; grid-template-columns: 1fr 1.6fr; gap: 0.5rem; margin: 0.4rem 0 0.2rem; }
+.reclasificar label { display: grid; gap: 0.2rem; font-size: 0.75rem; color: var(--texto-suave); }
 .reclasificar select {
-  flex: 1;
+  width: 100%;
   min-width: 0;
   font: inherit;
   font-size: 0.88rem;
@@ -448,7 +457,7 @@ a.aviso-noche { display: block; text-decoration: none; }
   border-radius: 8px;
   padding: 0.35rem 0.5rem;
 }
-.estado-recolecta { color: var(--acento); }
+.estado-resume { color: var(--acento); }
 .estado-pendiente, .estado-problema { color: var(--aviso); }
 .estado-consulta, .estado-fuera { color: var(--texto-suave); font-weight: 400; }
 
