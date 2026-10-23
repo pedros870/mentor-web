@@ -435,6 +435,19 @@ a.aviso-noche { display: block; text-decoration: none; }
 .por-que { margin: 0.2rem 0; font-size: 0.93rem; }
 .nota-pedro { margin: 0.1rem 0; font-size: 0.88rem; background: var(--acento-suave); border-radius: 8px; padding: 0.4rem 0.6rem; }
 .estado-fuente { font-size: 0.82rem; font-weight: 600; }
+
+.reclasificar { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.4rem; font-size: 0.82rem; color: var(--texto-suave); }
+.reclasificar select {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--texto);
+  background: var(--fondo);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 0.35rem 0.5rem;
+}
 .estado-recolecta { color: var(--acento); }
 .estado-pendiente, .estado-problema { color: var(--aviso); }
 .estado-consulta, .estado-fuera { color: var(--texto-suave); font-weight: 400; }

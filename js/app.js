@@ -524,16 +524,33 @@ async function vistaFuentes(subvista) {
     return;
   }
   if (subvista?.startsWith("canal/")) estadoFuentes.abiertos.add(subvista.slice(6)); // #/fuentes/canal/<canal>
-  const [{ fuentes }, ajustes, { ultima, articulos }] = await Promise.all([
+  const [{ fuentes }, ajustes, { ultima, articulos }, consolidadas, marcas] = await Promise.all([
     leerJSON("catalogo/fuentes.json"), leerJSON("catalogo/ajustes.json"), ultimaRecoleccion(),
+    leerJSON("catalogo/reclasificaciones.json").catch(() => ({ fuentes: {} })), todasLasMarcas(),
   ]);
   const fallas = new Map((await leerJSON(ultima.fallas)).corridas.at(-1).fallas.map((f) => [f.fuente_id, f]));
   const porFuente = new Map();
   for (const a of articulos) porFuente.set(a.fuente_id, (porFuente.get(a.fuente_id) || 0) + 1);
-  const lista = fuentes.map((f) => {
+
+  // Los cambios de canal de Pedro: los ya consolidados por el recolector y los
+  // recientes que aún esperan la próxima recolección. Manda el último.
+  const cambios = new Map(Object.entries(consolidadas.fuentes).map(([id, c]) => [id, { ...c, aplicado: true }]));
+  for (const m of marcas) {
+    if (m.tipo === "fuente" && m.campo === "canal" && (!cambios.has(m.fuente_id) || cambios.get(m.fuente_id).fecha < m.ts)) {
+      cambios.set(m.fuente_id, { canal: m.valor, anterior: m.anterior, fecha: m.ts, aplicado: false });
+    }
+  }
+  const armar = (f) => {
     const ajuste = ajustes.fuentes[f.id] || {};
-    return { ...f, enlace: ajuste.url || f.url, estado: estadoDeFuente(f, ajuste, fallas.get(f.id), porFuente.get(f.id)) };
-  });
+    const cambio = cambios.get(f.id);
+    const efectiva = cambio ? { ...f, canal_final: cambio.canal, recolectar: !["Consulta", "Fuera"].includes(cambio.canal) } : f;
+    let estado = estadoDeFuente(efectiva, cambio && efectiva.recolectar ? {} : ajuste, fallas.get(f.id), porFuente.get(f.id));
+    if (cambio && !cambio.aplicado) {
+      estado = { clase: "pendiente", texto: `La moviste a "${cambio.canal}": se aplica en la próxima recolección` };
+    }
+    return { ...efectiva, original: f.canal_final, cambio, enlace: ajuste.url || f.url, estado };
+  };
+  let lista = fuentes.map(armar);
   const cuenta = (clase) => lista.filter((f) => f.estado.clase === clase).length;
 
   const tarjeta = (f) => html`<li class="fuente">
@@ -549,6 +566,11 @@ async function vistaFuentes(subvista) {
         ? html`<span class="insignia">Cambiaste: ${f.canal_propuesto_por_claude} → ${f.canal_elegido_por_pedro}</span>` : ""}
     </span>
     <span class="estado-fuente estado-${f.estado.clase}">${f.estado.texto}</span>
+    <label class="reclasificar">Canal
+      <select data-fuente="${f.id}">
+        ${ORDEN_CANALES.map((c) => html`<option value="${c}" ${c === f.canal_final ? "selected" : ""}>${c}</option>`)}
+      </select>
+    </label>
   </li>`;
 
   const dibujarLista = () => {
@@ -604,6 +626,19 @@ async function vistaFuentes(subvista) {
     estadoFuentes.buscar = evento.target.value.trim();
     dibujarLista();
   });
+  // Reclasificar: el cambio se guarda como marca y la lista se reagrupa al instante.
+  contenido.onchange = (evento) => {
+    const selector = evento.target.closest("select[data-fuente]");
+    if (!selector) return;
+    const id = selector.dataset.fuente;
+    const actual = lista.find((f) => f.id === id);
+    const marca = marcar({ tipo: "fuente", campo: "canal", fuente_id: id, valor: selector.value, anterior: actual.canal_final });
+    cambios.set(id, { canal: selector.value, anterior: actual.canal_final, fecha: marca.ts, aplicado: false });
+    lista = fuentes.map(armar);
+    estadoFuentes.abiertos.add(selector.value);
+    avisar(`${actual.nombre}: ahora en "${selector.value}"`);
+    dibujarLista();
+  };
   dibujarLista();
 }
 
@@ -972,6 +1007,7 @@ async function enrutar() {
     if (activa) enlace.setAttribute("aria-current", "page");
   }
   contenido.onclick = null;
+  contenido.onchange = null;
   contenido.innerHTML = '<p class="cargando">Cargando…</p>';
   try {
     await VISTAS[vista](decodeURIComponent(resto.join("/")));
