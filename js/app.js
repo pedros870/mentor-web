@@ -233,17 +233,36 @@ function pintarResumen(r, lectura) {
     </details></li>`;
   };
 
+  // Formato 2 (desde el 23 de octubre): un texto corrido por categoría y, debajo,
+  // las noticias en que se apoya. El formato 1 partía el texto en temas.
+  const cuerpoCorrido = (c) => {
+    const preferencia = lectura.preferencias.get(`${r.fecha}|${c.nombre}|`);
+    return html`<div class="cuerpo cuerpo-resumen">${seguro(markdownAHtml(c.texto))}</div>
+      <h3 class="grupo">Las noticias</h3>
+      <ul class="lista-compacta">${c.articulos.map((a) => html`<li><a href="${enlaceLector(a)}">
+        <span class="articulo-titulo">${marcaDeLeido(lectura, a.archivo)}${a.titulo}</span>
+        <span class="meta">${a.fuente} · ${a.minutos} min</span>
+      </a></li>`)}</ul>
+      <div class="preferencias" data-categoria="${c.nombre}" data-tema="">
+        <button class="chip" type="button" data-preferencia="mas" aria-pressed="${String(preferencia === "mas")}">Más de esto</button>
+        <button class="chip" type="button" data-preferencia="menos" aria-pressed="${String(preferencia === "menos")}">Menos de esto</button>
+      </div>`;
+  };
+
   const seccion = (c) => {
-    const grupos = temasDeSeccion(c.texto);
+    const corrido = Array.isArray(c.articulos);
+    const grupos = corrido ? [] : temasDeSeccion(c.texto);
     const lista = estaLista(c.nombre);
-    const temas = grupos.reduce((n, g) => n + g.temas.length, 0);
+    const cuenta = corrido ? c.articulos.length : grupos.reduce((n, g) => n + g.temas.length, 0);
+    const unidad = corrido ? (cuenta === 1 ? "noticia" : "noticias") : (cuenta === 1 ? "tema" : "temas");
     return html`<details class="seccion${lista ? " lista" : ""}" name="secciones" data-categoria="${c.nombre}" ${estadoResumen.abierta === c.nombre ? "open" : ""}>
       <summary>
         <span class="seccion-titulo">${lista ? "✓ " : ""}${c.nombre}</span>
-        <span class="meta">${temas} ${temas === 1 ? "tema" : "temas"}</span>
+        <span class="meta">${cuenta} ${unidad}</span>
       </summary>
       <div class="seccion-cuerpo">
-        ${grupos.map((g) => html`${g.titulo ? html`<h3 class="grupo">${g.titulo}</h3>` : ""}<ul class="temas">${g.temas.map((t) => tema(c, t))}</ul>`)}
+        ${corrido ? cuerpoCorrido(c)
+          : grupos.map((g) => html`${g.titulo ? html`<h3 class="grupo">${g.titulo}</h3>` : ""}<ul class="temas">${g.temas.map((t) => tema(c, t))}</ul>`)}
         <div class="acciones">
           <button class="boton" type="button" data-lista="${c.nombre}">${lista ? "Volver a pendiente" : "Listo"}</button>
         </div>
@@ -469,6 +488,110 @@ async function vistaLector(ruta) {
   });
 }
 
+// ---------- Clasificación: qué hizo Claude con cada artículo ----------
+
+const estadoClasificacion = { recomendacion: "todas", categoria: "todas", buscar: "", visibles: 60 };
+
+async function vistaClasificacion() {
+  const resumen = await leerResumen();
+  if (!resumen) {
+    pintar(html`<section class="vacio"><p>Todavía no hay clasificación.</p>
+      <p class="meta">Aparece con el primer resumen de la mañana.</p></section>`);
+    return;
+  }
+  const lectura = await estadoDeLectura();
+  const detalle = resumen.clasificacion
+    ? new Map((await leerJSON(resumen.clasificacion)).articulos.map((a) => [a.archivo, a])) : new Map();
+  // A qué parte del resumen fue cada artículo.
+  const destino = new Map();
+  for (const c of resumen.categorias) {
+    // El formato 1 guardaba las citas como "citados"; el formato 2, como "articulos".
+    const usados = c.articulos ? c.articulos.map((a) => a.archivo) : c.citados || [];
+    for (const archivo of usados) destino.set(archivo, c.nombre);
+  }
+  for (const l of resumen.lecturas_del_dia) destino.set(l.archivo, destino.get(l.archivo) || "Lecturas del día");
+  if (resumen.aviso_noche_archivo) {
+    destino.set(resumen.aviso_noche_archivo, destino.get(resumen.aviso_noche_archivo) || "Para la noche");
+  }
+  const articulos = resumen.titulares.map((t) => ({ ...detalle.get(t.archivo), ...t, destino: destino.get(t.archivo) }));
+  const cuenta = (rec) => articulos.filter((a) => a.recomendacion === rec).length;
+  const categorias = CATEGORIAS.filter((c) => articulos.some((a) => a.categoria === c));
+
+  const fila = (a) => html`<li class="clasificado">
+    <a class="articulo-titulo" href="${enlaceLector(a)}">${marcaDeLeido(lectura, a.archivo)}${a.titulo}</a>
+    <span class="meta">${a.fuente} · ${a.minutos} min</span>
+    <span class="insignias">
+      <span class="insignia insignia-${a.recomendacion}">${RECOMENDACIONES[a.recomendacion]}</span>
+      <span class="insignia">${a.categoria}${a.sector ? ` · ${a.sector}` : ""}</span>
+      ${a.tipo ? html`<span class="insignia">${a.tipo}</span>` : ""}
+    </span>
+    ${a.novedad ? html`<span class="meta">Relevancia ${a.relevancia} · Novedad ${a.novedad} · Impacto ${a.impacto}</span>` : ""}
+    <span class="razon">${a.razon}</span>
+    <span class="${a.destino ? "destino" : "destino destino-fuera"}">${a.destino ? `→ En el resumen: ${a.destino}` : "No entró al texto del resumen"}</span>
+  </li>`;
+
+  const dibujarLista = () => {
+    const consulta = sinTildes(estadoClasificacion.buscar);
+    const elegidos = articulos.filter((a) =>
+      (estadoClasificacion.recomendacion === "todas" || a.recomendacion === estadoClasificacion.recomendacion)
+      && (estadoClasificacion.categoria === "todas" || a.categoria === estadoClasificacion.categoria)
+      && (!consulta || sinTildes(`${a.titulo} ${a.fuente} ${a.razon} ${a.subtema || ""}`).includes(consulta)))
+      .sort((a, b) => ORDEN_RECOMENDACION[a.recomendacion] - ORDEN_RECOMENDACION[b.recomendacion] || b.relevancia - a.relevancia);
+    const visibles = elegidos.slice(0, estadoClasificacion.visibles);
+    pintar(html`
+      <p class="meta">${numero(elegidos.length)} ${elegidos.length === 1 ? "artículo" : "artículos"}</p>
+      <ul class="lista-clasificacion">${visibles.map(fila)}</ul>
+      ${visibles.length < elegidos.length ? html`<button class="boton-texto" type="button" id="ver-mas">Ver ${Math.min(60, elegidos.length - visibles.length)} más</button>` : ""}
+    `, document.getElementById("lista-clasificacion"));
+    document.getElementById("ver-mas")?.addEventListener("click", () => {
+      estadoClasificacion.visibles += 60;
+      dibujarLista();
+    });
+  };
+
+  pintar(html`
+    <header class="encabezado-vista">
+      <p class="sobretitulo">Resumen del ${fechaLarga(resumen.fecha)}</p>
+      <h1>Clasificación</h1>
+      <p class="meta">Lo que Claude decidió con cada uno de los ${numero(articulos.length)} artículos revisados y a qué parte del resumen fue.</p>
+    </header>
+    <div class="chips" role="group" aria-label="Filtrar por recomendación">
+      ${["todas", "leer", "resumen", "saltar"].map((rec) => html`<button class="chip" type="button" data-recomendacion="${rec}" aria-pressed="${String(estadoClasificacion.recomendacion === rec)}">${rec === "todas" ? "Todas" : RECOMENDACIONES[rec]} <span>${rec === "todas" ? articulos.length : cuenta(rec)}</span></button>`)}
+    </div>
+    <div class="filtros">
+      <label><span class="oculto">Categoría</span>
+        <select id="categoria">
+          <option value="todas">Todas las categorías</option>
+          ${categorias.map((c) => html`<option value="${c}" ${estadoClasificacion.categoria === c ? "selected" : ""}>${c}</option>`)}
+        </select>
+      </label>
+      <label class="buscador"><span class="oculto">Buscar</span>
+        <input id="buscar-clasificacion" type="search" placeholder="Buscar título, fuente o razón" autocomplete="off" value="${estadoClasificacion.buscar}">
+      </label>
+    </div>
+    <div id="lista-clasificacion"></div>
+  `);
+  contenido.onclick = (evento) => {
+    const chip = evento.target.closest("[data-recomendacion]");
+    if (!chip) return;
+    estadoClasificacion.recomendacion = chip.dataset.recomendacion;
+    estadoClasificacion.visibles = 60;
+    for (const otro of contenido.querySelectorAll("[data-recomendacion]")) otro.setAttribute("aria-pressed", String(otro === chip));
+    dibujarLista();
+  };
+  document.getElementById("categoria").addEventListener("change", (evento) => {
+    estadoClasificacion.categoria = evento.target.value;
+    estadoClasificacion.visibles = 60;
+    dibujarLista();
+  });
+  document.getElementById("buscar-clasificacion").addEventListener("input", (evento) => {
+    estadoClasificacion.buscar = evento.target.value.trim();
+    estadoClasificacion.visibles = 60;
+    dibujarLista();
+  });
+  dibujarLista();
+}
+
 // ---------- Para leer ----------
 
 const ORDEN_MOMENTO = { "Este trimestre": 0, "Este año": 1, "Siguiente trimestre": 2, "Algún día": 3 };
@@ -692,6 +815,7 @@ async function vistaConectar() {
 const VISTAS = {
   hoy: vistaHoy,
   leer: vistaLector,
+  clasificacion: vistaClasificacion,
   "para-leer": vistaParaLeer,
   radar: vistaRadar,
   vocabulario: vistaVocabulario,

@@ -128,7 +128,8 @@ h2 { font-size: 1.2rem; margin: 0 0 0.75rem; }
   gap: 2px;
   color: var(--texto-suave);
   text-decoration: none;
-  font-size: 0.7rem;
+  font-size: 0.66rem;
+  min-width: 0;
 }
 
 .navegacion a[aria-current] { color: var(--acento); }
@@ -414,6 +415,32 @@ a.aviso-noche { display: block; text-decoration: none; }
 .insignia-leer { background: var(--acento); border-color: transparent; color: var(--acento-texto); margin-left: 0; }
 .insignia-resumen { background: var(--acento-suave); border-color: transparent; color: var(--acento); margin-left: 0; }
 .insignia-saltar { margin-left: 0; }
+
+/* ---------- Clasificación ---------- */
+
+.filtros { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 0.5rem; margin: 0 0 0.75rem; }
+.filtros .buscador { margin: 0; }
+
+.filtros select {
+  width: 100%;
+  font: inherit;
+  color: var(--texto);
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  padding: 0.65rem 0.6rem;
+}
+
+.lista-clasificacion { list-style: none; margin: 0.5rem 0 0; padding: 0; }
+.clasificado { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.8rem 0; border-top: 1px solid var(--borde); }
+.clasificado .articulo-titulo { color: var(--texto); text-decoration: none; }
+.clasificado .articulo-titulo:hover { color: var(--acento); }
+.destino { font-size: 0.82rem; font-weight: 600; color: var(--acento); }
+.destino-fuera { color: var(--texto-suave); font-weight: 400; }
+
+@media (max-width: 420px) {
+  .filtros { grid-template-columns: 1fr; }
+}
 
 /* ---------- Valorar lo leído ---------- */
 
