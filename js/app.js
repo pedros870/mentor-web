@@ -207,7 +207,7 @@ function marcaDeLeido(lectura, archivo) {
 function itemTitular(t, lectura) {
   return html`<li><a class="articulo" href="${enlaceLector(t)}">
     <span class="articulo-titulo">${marcaDeLeido(lectura, t.archivo)}${t.titulo}</span>
-    <span class="meta"><span class="insignia insignia-${t.recomendacion}">${RECOMENDACIONES[t.recomendacion]}</span> ${t.fuente} · ${t.minutos} min</span>
+    <span class="meta"><span class="insignia insignia-${t.recomendacion}">${RECOMENDACIONES[t.recomendacion]}</span> ${t.fuente} · ${t.minutos} min${t.fuentes_historia > 1 ? ` · historia de ${t.fuentes_historia} fuentes` : ""}</span>
     <span class="razon">${t.razon}</span>
   </a></li>`;
 }
@@ -302,6 +302,19 @@ function pintarResumen(r, lectura, aviso) {
       </div>
     </header>
     ${aviso && aviso.generado > r.generado ? html`<p class="aviso">${aviso.texto}</p>` : ""}
+    ${r.importante?.length ? html`<section class="importante">
+      <h2>Lo importante hoy</h2>
+      <ol>${r.importante.map((i) => html`<li>
+        <p>${seguro(enLinea(i.texto))}</p>
+        <details class="profundizar">
+          <summary>${i.fuentes > 1 ? `${i.fuentes} fuentes` : "1 fuente"} · ver ${i.articulos.length === 1 ? "el artículo" : `${i.articulos.length} artículos`}</summary>
+          <ul class="lista-compacta">${i.articulos.map((a) => html`<li><a href="${enlaceLector(a)}">
+            <span class="articulo-titulo">${marcaDeLeido(lectura, a.archivo)}${a.titulo}</span>
+            <span class="meta">${a.fuente} · ${a.minutos} min</span>
+          </a></li>`)}</ul>
+        </details>
+      </li>`)}</ol>
+    </section>` : ""}
     ${r.aviso_noche ? (r.aviso_noche_archivo
       ? html`<a class="aviso-noche" href="${enlaceLector({ archivo: r.aviso_noche_archivo })}">${marcaDeLeido(lectura, r.aviso_noche_archivo)}${r.aviso_noche} <span class="leer-ahora">Leer →</span></a>`
       : html`<p class="aviso-noche">${r.aviso_noche}</p>`) : ""}

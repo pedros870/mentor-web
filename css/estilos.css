@@ -352,6 +352,30 @@ main:focus { outline: none; }
 a.aviso-noche { display: block; text-decoration: none; }
 .leer-ahora { color: var(--acento); font-weight: 600; white-space: nowrap; }
 
+.importante { margin: 0 0 1.5rem; }
+.importante h2 { font-size: 1.35rem; margin-bottom: 0.5rem; }
+.importante ol { margin: 0; padding: 0; list-style: none; counter-reset: importante; }
+.importante li { counter-increment: importante; position: relative; padding: 0.6rem 0 0.6rem 2rem; border-top: 1px solid var(--borde); }
+.importante li:first-child { border-top: 0; }
+.importante li::before {
+  content: counter(importante);
+  position: absolute;
+  left: 0;
+  top: 0.65rem;
+  width: 1.4rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  background: var(--acento);
+  color: var(--acento-texto);
+  font-size: 0.8rem;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+.importante li p { margin: 0 0 0.25rem; font-family: var(--serif); font-size: 1.05rem; line-height: 1.45; }
+.importante .lista-compacta li { padding: 0; border: 0; counter-increment: none; }
+.importante .lista-compacta li::before { content: none; }
+
 .lecturas-del-dia { margin: 0 0 1.5rem; }
 .lecturas-del-dia h2 { font-size: 1rem; font-family: var(--sans); color: var(--texto-suave); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.4rem; }
 
