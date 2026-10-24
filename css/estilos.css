@@ -650,6 +650,8 @@ progress.gasto::-moz-progress-bar { background: var(--acento); border-radius: 99
 .lectura .articulo-titulo { color: var(--texto); text-decoration: none; }
 .lectura .articulo-titulo:hover { color: var(--acento); }
 .lectura p { margin: 0.2rem 0 0; color: var(--texto-suave); font-size: 0.95rem; }
+.acciones-lectura { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.6rem; }
+.acciones-lectura .boton-secundario { padding: 0.4rem 0.8rem; font-size: 0.9rem; }
 
 /* ---------- Radar y estado ---------- */
 

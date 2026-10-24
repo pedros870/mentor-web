@@ -149,21 +149,27 @@ async function estadoDeLectura() {
   const notas = new Map();
   const listas = new Map();
   const preferencias = new Map();
+  const marcadas = new Set(); // lo que tiene alguna marca de leído o calificación en estos días
   for (const m of await todasLasMarcas()) {
+    // Un artículo o una lectura de la biblioteca se marca por su archivo; una lectura
+    // que no está en la biblioteca, por su id.
+    const clave = m.archivo || (m.lectura ? `lectura:${m.lectura}` : null);
     if (m.tipo === "leido") {
-      if (m.valor === false) leidos.delete(m.archivo); else leidos.add(m.archivo);
+      if (m.valor === false) leidos.delete(clave); else leidos.add(clave);
+      marcadas.add(clave);
     } else if (m.tipo === "calificacion") {
-      calificaciones.set(m.archivo, m.valor);
-      leidos.add(m.archivo);
+      calificaciones.set(clave, m.valor);
+      leidos.add(clave);
+      marcadas.add(clave);
     } else if (m.tipo === "nota") {
-      notas.set(m.archivo, m.texto);
+      notas.set(clave, m.texto);
     } else if (m.tipo === "categoria") {
       listas.set(`${m.resumen}|${m.categoria}`, m.estado === "lista");
     } else if (m.tipo === "preferencia") {
       preferencias.set(`${m.resumen}|${m.categoria}|${m.tema}`, m.valor);
     }
   }
-  return { leidos, calificaciones, notas, listas, preferencias };
+  return { leidos, calificaciones, notas, listas, preferencias, marcadas };
 }
 
 // Parte una sección en temas: cada párrafo empieza con lo que cambió, en
@@ -452,7 +458,8 @@ async function vistaHoy(categoria) {
 // ---------- Lector ----------
 
 async function vistaLector(ruta) {
-  if (!/^datos\/crudo\/[\w/.-]+\.md$/.test(ruta)) throw new Error("La dirección no corresponde a un artículo.");
+  if (!/^datos\/(crudo|biblioteca)\/[\w/.-]+\.md$/.test(ruta)) throw new Error("La dirección no corresponde a un artículo.");
+  const deLaBiblioteca = ruta.startsWith("datos/biblioteca/");
   const { ficha, cuerpo } = separarFicha(await leerTexto(ruta));
   const texto = cuerpo
     .replace(/^\s*# .*\n/, "") // el título ya va en la cabecera
@@ -460,9 +467,9 @@ async function vistaLector(ruta) {
   const extracto = ficha.extraccion === "extracto";
   const [resumen, lectura] = await Promise.all([leerResumen().catch(() => null), estadoDeLectura()]);
   const clasificacion = resumen?.titulares.find((t) => t.archivo === ruta);
-  // Lo que el sistema recomendó leer completo se califica con "¿valió la pena?"
-  // (mide si acierta); lo demás, con "¿te sirvió?" (mide lo que se está perdiendo).
-  const recomendada = resumen?.lecturas_del_dia.some((l) => l.archivo === ruta)
+  // Lo que el sistema recomendó leer completo (y lo de Para leer) se califica con
+  // "¿valió la pena?" (mide si acierta); lo demás, con "¿te sirvió?" (mide lo que se está perdiendo).
+  const recomendada = deLaBiblioteca || resumen?.lecturas_del_dia.some((l) => l.archivo === ruta)
     || resumen?.aviso_noche_archivo === ruta || clasificacion?.recomendacion === "leer";
   const pregunta = recomendada ? "valio_la_pena" : "te_sirvio";
   const calificacion = lectura.calificaciones.get(ruta);
@@ -470,7 +477,7 @@ async function vistaLector(ruta) {
   marcar({ tipo: "abierto", archivo: ruta });
   pintar(html`
     <article class="lector">
-      <a class="volver" href="#/hoy">← Hoy</a>
+      ${deLaBiblioteca ? html`<a class="volver" href="#/para-leer">← Para leer</a>` : html`<a class="volver" href="#/hoy">← Hoy</a>`}
       <header>
         <p class="sobretitulo">${ficha.fuente}${ficha.categoria_inicial ? ` · ${ficha.categoria_inicial}` : ""}</p>
         <h1>${ficha.titulo}</h1>
@@ -495,7 +502,7 @@ async function vistaLector(ruta) {
         <a class="boton-secundario" href="${ficha.url}" target="_blank" rel="noopener noreferrer">Abrir el original ↗</a>
         ${ficha.tambien_en?.length ? html`<p class="meta">También publicado en:</p>
           <ul class="tambien">${ficha.tambien_en.map((u) => html`<li><a href="${u}" target="_blank" rel="noopener noreferrer">${dominio(u)}</a></li>`)}</ul>` : ""}
-        <p class="meta">Texto de la fuente, recolectado el ${fechaLarga(ficha.fecha_recoleccion)}.</p>
+        <p class="meta">Texto de ${deLaBiblioteca ? "la biblioteca, guardado" : "la fuente, recolectado"} el ${fechaLarga(ficha.fecha_recoleccion)}.</p>
       </footer>
     </article>
   `);
@@ -811,22 +818,61 @@ async function vistaClasificacion() {
 // ---------- Para leer ----------
 
 const ORDEN_MOMENTO = { "Este trimestre": 0, "Este año": 1, "Siguiente trimestre": 2, "Algún día": 3 };
+const ACCESOS = { aqui: "Se lee aquí", libre: "Gratis en la web", pdf: "PDF gratis", pago: "De pago", libro: "Libro" };
+const ACCIONES = { libre: "Leer en la web", pdf: "Abrir el PDF", pago: "Abrir el original", libro: "Ver el libro" };
 
-function itemLectura(l) {
+// A dónde lleva cada lectura: al lector de Mentor si el texto ya está en la biblioteca;
+// si no, al texto en la web o a la ficha del libro; en último caso, a la búsqueda del catálogo.
+function destinoDeLectura(l, enlace, guardada) {
+  if (guardada?.archivo) {
+    return { href: `#/leer/${encodeURIComponent(guardada.archivo)}`, externo: false, acceso: "aqui", accion: "Leer aquí" };
+  }
+  if (enlace?.enlace && enlace.acceso in ACCIONES) {
+    const acceso = enlace.acceso === "libre" && enlace.formato === "pdf" ? "pdf" : enlace.acceso;
+    return { href: enlace.enlace, externo: true, acceso, accion: ACCIONES[acceso] };
+  }
+  return l.url ? { href: l.url, externo: true, acceso: null, accion: "Buscar en la web" } : null;
+}
+
+function itemLectura({ l, destino, guardada, leida, segundo }) {
+  const abrir = (clase, texto) => destino
+    ? html`<a class="${clase}" href="${destino.href}"${destino.externo ? html` target="_blank" rel="noopener noreferrer"` : ""}>${texto}</a>`
+    : html`<span class="${clase}">${texto}</span>`;
+  const duracion = guardada?.minutos_lectura ? `${guardada.minutos_lectura} min` : l.horas_estimadas ? `${l.horas_estimadas} h` : "";
   return html`<li class="lectura">
-    <a class="articulo-titulo" href="${l.url}" target="_blank" rel="noopener noreferrer">${l.titulo}</a>
-    <span class="meta">${l.autor}</span>
-    <span class="insignias"><span class="insignia insignia-acento">${l.momento_final}</span><span class="insignia">${l.hoja_origen}</span>${l.horas_estimadas ? html`<span class="insignia">${l.horas_estimadas} h</span>` : ""}</span>
+    ${abrir("articulo-titulo", l.titulo)}
+    <span class="meta">${[l.autor, duracion].filter(Boolean).join(" · ")}</span>
+    <span class="insignias"><span class="insignia">${l.momento_final}</span><span class="insignia">${l.hoja_origen}</span>${destino?.acceso ? html`<span class="insignia${destino.acceso === "aqui" ? " insignia-acento" : ""}">${ACCESOS[destino.acceso]}</span>` : ""}</span>
     ${l.por_que ? html`<p>${l.por_que}</p>` : ""}
+    <div class="acciones-lectura">
+      ${destino ? abrir("boton-secundario", `${destino.accion}${destino.externo ? " ↗" : ""}`) : ""}
+      ${segundo ? html`<a class="boton-secundario" href="${segundo}" target="_blank" rel="noopener noreferrer">Otro texto ↗</a>` : ""}
+      <button class="boton-secundario" type="button" data-leida="${l.id}" aria-pressed="${String(leida)}">${leida ? "✓ Leída" : "Lo leí"}</button>
+    </div>
   </li>`;
 }
 
 async function vistaParaLeer() {
-  const { lecturas } = await leerJSON("catalogo/lecturas.json");
+  const [{ lecturas }, { enlaces }, biblioteca, consolidado, lectura] = await Promise.all([
+    leerJSON("catalogo/lecturas.json"),
+    leerJSON("catalogo/lecturas_enlaces.json").catch(() => ({ enlaces: {} })),
+    leerJSON("datos/biblioteca/indice.json").catch(() => ({})),
+    leerJSON("datos/biblioteca/estado.json").catch(() => ({})),
+    estadoDeLectura(),
+  ]);
+  // Leída si lo dice la biblioteca (que junta las marcas de cada noche) o una marca reciente.
+  const leida = (l) => {
+    const archivo = biblioteca[l.id]?.archivo;
+    const reciente = [`lectura:${l.id}`, archivo].find((clave) => clave && lectura.marcadas.has(clave));
+    return reciente ? lectura.leidos.has(reciente) : Boolean(consolidado[l.id]?.leida);
+  };
+  const conDestino = (l) => ({ l, destino: destinoDeLectura(l, enlaces[l.id], biblioteca[l.id]), guardada: biblioteca[l.id],
+    segundo: enlaces[l.id]?.enlace_2, leida: false });
   const pendientes = lecturas
-    .filter((l) => l.momento_final !== "Ya leído")
+    .filter((l) => l.momento_final !== "Ya leído" && !leida(l))
     .sort((a, b) => (ORDEN_MOMENTO[a.momento_final] ?? 9) - (ORDEN_MOMENTO[b.momento_final] ?? 9)
-      || (a.horas_estimadas ?? 99) - (b.horas_estimadas ?? 99));
+      || (a.horas_estimadas ?? 99) - (b.horas_estimadas ?? 99))
+    .map(conDestino);
   pintar(html`
     <header class="encabezado-vista">
       <p class="sobretitulo">${pendientes.length} lecturas en la cola</p>
@@ -851,12 +897,23 @@ async function vistaParaLeer() {
       pintar(html`${pendientes.slice(0, 10).map(itemLectura)}`, lista);
       return;
     }
-    const halladas = pendientes.filter((l) =>
+    const halladas = pendientes.filter(({ l }) =>
       sinTildes([l.titulo, l.autor, l.por_que, ...(l.etiquetas || [])].join(" ")).includes(consulta));
     titulo.textContent = halladas.length ? `${halladas.length} en la biblioteca` : "Nada con ese texto";
     pintar(html`${halladas.slice(0, 40).map(itemLectura)}`, lista);
   };
   buscar.addEventListener("input", dibujar);
+  // "Lo leí" deja la lectura en su sitio hasta la próxima visita, para poder deshacerlo.
+  lista.addEventListener("click", (evento) => {
+    const boton = evento.target.closest("[data-leida]");
+    if (!boton) return;
+    const p = pendientes.find(({ l }) => l.id === boton.dataset.leida);
+    p.leida = !p.leida;
+    marcar({ tipo: "leido", lectura: p.l.id, ...(p.guardada?.archivo ? { archivo: p.guardada.archivo } : {}), valor: p.leida });
+    boton.setAttribute("aria-pressed", String(p.leida));
+    boton.textContent = p.leida ? "✓ Leída" : "Lo leí";
+    avisar(p.leida ? "Marcada como leída: sale de la cola" : "Vuelve a la cola");
+  });
   dibujar();
 }
 
