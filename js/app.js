@@ -1120,9 +1120,9 @@ async function vistaConectar() {
 // ---------- Navegación ----------
 
 // ---------- Hoy, Geografía, Áreas y Sectores ----------
-// Lee datos/v2/, que escribe scripts/organizar.py cada noche. Las grillas son para escoger
-// y las páginas para leer. "Lo nuevo" se calcula contra la última visita a cada página y
-// la última vez que se abrió cada historia, que quedan como marcas.
+// Lee datos/v2/, que escribe scripts/organizar.py cada noche. Todas se leen como Hoy. "Lo
+// nuevo" se calcula contra la última visita a cada subpestaña y la última vez que se abrió
+// cada historia, que quedan como marcas.
 
 const GRUPOS = { geografia: "Geografía", areas: "Áreas", sectores: "Sectores" };
 const VISTA_DE_GRUPO = { "Geografía": "geografia", "Áreas": "areas", "Sectores": "sectores" };
@@ -1171,11 +1171,6 @@ function estadoDeHistoria(h, visto) {
   return (h.cambios || h.actualizaciones.map((a) => a.momento)).some((m) => despues(m, visto)) ? "actualizada" : "aldia";
 }
 
-function contarNovedades(pagina, visto) {
-  const estados = pagina.historias.map((h) => estadoDeHistoria(h, visto));
-  return { nuevas: estados.filter((e) => e === "nueva").length, actualizadas: estados.filter((e) => e === "actualizada").length };
-}
-
 function resaltar(vista) {
   for (const enlace of document.querySelectorAll("[data-vista]")) {
     if (enlace.dataset.vista === vista) enlace.setAttribute("aria-current", "page");
@@ -1183,104 +1178,93 @@ function resaltar(vista) {
   }
 }
 
-// ---------- Las grillas ----------
-// Cada tarjeta trae lo relevante completo, para leer de corrido sin entrar; entrar es para ver
-// las noticias. Las tarjetas se acomodan en columnas sin huecos: primero las que tuvieron
-// noticias hoy, luego las que solo tuvieron antes en la semana, con la fecha de su resumen.
-// Lo que no tiene nada que contar queda en una línea al final de su sección.
+// ---------- Geografía, Áreas y Sectores: subpestañas en el formato de Hoy ----------
+// Cada subpestaña (una región, un área o un sector) abre como Hoy: lo relevante numerado, que no
+// repite lo de Hoy, el resto de las noticias del día y para profundizar. Lo que ya está en Hoy y
+// lo que ya abriste en otro lado van al final, apagados. Los países y las tecnologías son filtros.
 
-const conTarjeta = (t) => t.hoy > 0 || (!t.grilla && t.total > 0 && Boolean(t.lectura));
-
-function pieTarjeta(t, visto) {
-  if (!t.hoy) return `${noticiasTexto(t.total)} en la semana →`;
-  const { nuevas, actualizadas } = contarNovedades(t, visto);
-  return `${[`${noticiasTexto(t.hoy)} hoy`, visto && nuevas ? `${nuevas} nuevas` : "",
-    visto && actualizadas ? `${actualizadas} con novedades` : ""].filter(Boolean).join(" · ")} →`;
-}
-
-// Tecnologías disruptivas no tiene resumen propio: muestra el de cada tecnología que se movió.
-function tarjetaConHijas(t, paginas) {
-  const hijas = paginas.filter((h) => h.padre === t.pagina);
-  const movidas = hijas.filter((h) => h.hoy).sort((a, b) => b.hoy - a.hoy);
-  return html`<article class="tarjeta-mural">
-    <h3 class="mural-nombre"><a href="${enlacePagina(t.pagina)}">${t.nombre}</a></h3>
-    <ul class="mural-lista">${movidas.map((h) => html`<li><a href="${enlacePagina(h.pagina)}">${h.nombre}</a>${
-      h.tarjeta ? `: ${h.tarjeta}` : ""}</li>`)}</ul>
-    <a class="mural-pie" href="${enlacePagina(t.pagina)}">${noticiasTexto(t.hoy)} hoy en ${movidas.length} de ${hijas.length} tecnologías →</a>
-  </article>`;
-}
-
-function tarjetaPagina(t, visitas, dia, paginas) {
-  if (t.grilla) return tarjetaConHijas(t, paginas);
-  const texto = t.lectura || t.tarjeta;
-  const deOtroDia = texto && t.fecha_lectura && t.fecha_lectura !== dia;
-  return html`<article class="tarjeta-mural${t.hoy ? "" : " quieta"}">
-    <h3 class="mural-nombre"><a href="${enlacePagina(t.pagina)}">${t.nombre}</a></h3>
-    ${deOtroDia ? html`<p class="mural-fecha">Lo último, del ${fechaCorta(t.fecha_lectura)}</p>` : ""}
-    ${texto ? html`<div class="mural-texto">${seguro(markdownAHtml(texto))}</div>` : ""}
-    <a class="mural-pie" href="${enlacePagina(t.pagina)}">${pieTarjeta(t, visitas.get(t.pagina))}</a>
-  </article>`;
-}
-
-function grillas(tarjetas, visitas, dia, paginas) {
-  const secciones = [...agrupar(tarjetas, (t) => t.seccion || "")];
-  const conNombre = ([seccion, lista]) => seccion && !(lista.length === 1 && lista[0].nombre === seccion);
-  // Con muchas secciones, la página es larga: una barra fija para saltar entre ellas.
-  const saltos = secciones.length > 3 ? html`<nav class="saltos" aria-label="Secciones">${secciones.map(([seccion, lista], i) => {
-    const hoy = lista.reduce((n, t) => n + t.hoy, 0);
-    return html`<button type="button" class="${hoy ? "" : "vacia"}" data-salto="seccion-${i}">${seccion}<span class="cuenta">${hoy}</span></button>`;
-  })}</nav>` : "";
-  return html`${saltos}${secciones.map(([seccion, lista], i) => {
-    const visibles = [...lista.filter((t) => t.hoy), ...lista.filter((t) => !t.hoy && conTarjeta(t))];
-    const quietas = lista.filter((t) => !conTarjeta(t));
-    return html`<section class="seccion-grilla" id="seccion-${i}">
-      ${conNombre([seccion, lista]) ? html`<h2>${seccion}</h2>` : ""}
-      ${visibles.length ? html`<div class="mural">${visibles.map((t) => tarjetaPagina(t, visitas, dia, paginas))}</div>` : ""}
-      ${quietas.length ? html`<p class="sin-noticias">Sin noticias hoy: ${quietas.map((t, j) =>
-        html`${j ? " · " : ""}<a href="${enlacePagina(t.pagina)}">${t.nombre}</a>`)}</p>` : ""}
-    </section>`;
-  })}`;
-}
-
-// La barra de saltos queda pegada debajo de la cabecera, que cambia de alto entre celular y computador.
-function escucharSaltos() {
-  const cabecera = document.querySelector(".cabecera");
-  if (cabecera) document.documentElement.style.setProperty("--alto-cabecera", `${cabecera.offsetHeight}px`);
-  contenido.onclick = (evento) => {
-    const boton = evento.target.closest("[data-salto]");
-    if (boton) document.getElementById(boton.dataset.salto)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  };
-}
-
-async function vistaGrupo(clave) {
+async function vistaPestanas(clave, ruta) {
   const grupo = GRUPOS[clave];
-  const [indice, { visitas }] = await Promise.all([leerJSON("datos/v2/indice.json"), marcasV2()]);
-  const tarjetas = indice.paginas.filter((t) => t.grupo === grupo && !t.padre);
-  pintar(html`
-    <header class="encabezado-vista">
-      <p class="sobretitulo">${fechaLarga(indice.dia)} · ${noticiasTexto(tarjetas.reduce((n, t) => n + t.hoy, 0))} hoy</p>
-      <h1>${grupo}</h1>
-    </header>
-    ${grillas(tarjetas, visitas, indice.dia, indice.paginas)}
-    ${grupo === "Sectores" ? html`<p class="nota">Cada sector reúne lo que lo toca, venga del país o del área que sea, y lo que traen las fuentes del radar.
-      <a href="#/radar">El radar y sus fuentes →</a></p>` : ""}
-  `);
-  escucharSaltos();
-}
+  const [slugPestana, filtro] = (ruta || "").split("/");
+  const indice = await leerJSON("datos/v2/indice.json");
+  const pestanas = indice.pestanas.filter((p) => p.grupo === grupo);
+  const elegida = pestanas.find((p) => p.slug === slugPestana) || pestanas[0];
+  const [pestana, { visitas, leidas }, guardadas] = await Promise.all([
+    leerJSON(`datos/v2/pestanas/${elegida.pestana}.json`), marcasV2(), piezasGuardadas()]);
+  const paginas = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t]));
+  const varias = pestana.hojas.length > 1;
+  const hoja = varias && pestana.hojas.includes(filtro) ? filtro : null;
+  const deLaHoja = (x) => !hoja || x.hoja === hoja;
 
-async function vistaGrillaHijas(tarjeta, indice) {
-  const { visitas } = await marcasV2();
-  const hijas = indice.paginas.filter((t) => t.padre === tarjeta.pagina);
+  const visita = masReciente(visitas.get(pestana.pestana), hoja && visitas.get(hoja));
+  const visto = (h) => masReciente(leidas.get(h.id), visita);
+  const enHoy = new Set(pestana.en_hoy);
+  // Ya vista: está en Hoy, o la abriste y no ha tenido novedades desde entonces.
+  const marca = (h) => (enHoy.has(h.id) ? "En Hoy"
+    : leidas.has(h.id) && estadoDeHistoria(h, leidas.get(h.id)) === "aldia" ? "Ya la leíste" : null);
+  // El país o la tecnología de cada noticia, cuando la subpestaña reúne varias, y en Sectores, de dónde viene.
+  const pagina = (h) => (!hoja && (varias || !pestana.hojas.includes(h.hoja)) ? paginas[h.hoja] : undefined);
+
+  const porId = new Map([...pestana.hoy, ...pestana.semana].map((h) => [h.id, h]));
+  const relevante = pestana.relevante.map((r) => ({ ...r, h: porId.get(r.historia) })).filter((r) => r.h && deLaHoja(r.h));
+  const enRelevante = new Set(relevante.map((r) => r.historia));
+  const hoy = pestana.hoy.filter((h) => deLaHoja(h) && !enRelevante.has(h.id));
+  const resto = [...hoy.filter((h) => !marca(h)), ...hoy.filter((h) => marca(h))];
+  const semana = pestana.semana.filter(deLaHoja);
+  const profundizar = pestana.profundizar.filter(deLaHoja);
+  const pocoInteres = pestana.poco_interes.filter(deLaHoja);
+  const cerradas = pestana.cerradas.filter(deLaHoja);
+  const nombres = varias && !hoja ? Object.fromEntries(pestana.hojas.map((pid) => [pid, paginas[pid].nombre])) : null;
+  const deOtroDia = pestana.fecha_relevante && pestana.fecha_relevante !== pestana.dia;
+  const base = `#/${clave}/${pestana.slug}`;
+
   pintar(html`
-    <header class="encabezado-vista">
-      <a class="volver" href="#/${VISTA_DE_GRUPO[tarjeta.grupo]}">← ${tarjeta.grupo}</a>
-      <h1>${tarjeta.nombre}</h1>
-      <p class="meta">${noticiasTexto(tarjeta.hoy)} hoy, en ${tarjeta.movidas.length} de ${hijas.length} tecnologías</p>
-    </header>
-    ${grillas(hijas, visitas, indice.dia, indice.paginas)}
+    <div class="encabezado-pestanas">
+      <p class="sobretitulo">${grupo} · ${fechaLarga(indice.dia)}</p>
+      <nav class="pestanas" aria-label="${grupo}">${pestanas.map((p) => html`<a href="#/${clave}/${p.slug}"
+        aria-current="${p.pestana === pestana.pestana ? "page" : "false"}">${p.nombre}<span class="cuenta">${p.hoy}</span></a>`)}</nav>
+    </div>
+    <div class="dos-columnas">
+      <div class="principal">
+        <header class="encabezado-vista">
+          <h1>Lo relevante en ${hoja ? paginas[hoja].nombre : pestana.nombre}</h1>
+          ${deOtroDia ? html`<p class="meta">Escrito el ${fechaLarga(pestana.fecha_relevante)}</p>` : ""}
+        </header>
+        ${varias ? html`<div class="filtros-pestana">
+          <a class="chip" href="${base}" aria-current="${hoja ? "false" : "page"}">Todo</a>
+          ${pestana.hojas.map((pid) => html`<a class="chip${paginas[pid].hoy ? "" : " sin-hoy"}" href="${base}/${pid}"
+            aria-current="${pid === hoja ? "page" : "false"}">${paginas[pid].nombre}${paginas[pid].hoy ? html`<span>${paginas[pid].hoy}</span>` : ""}</a>`)}
+        </div>` : ""}
+        ${relevante.length ? html`<ol class="relevante">${relevante.map((r) => html`<li>${noticia(r.h, visto(r.h),
+          { titulo: r.texto, pagina: pagina(r.h), marca: marca(r.h) })}</li>`)}</ol>`
+          : html`<p class="nota">${hoy.some((h) => enHoy.has(h.id)) ? "Lo más importante de aquí ya está en Hoy."
+            : hoy.length ? "Hoy no se escribió lo relevante de aquí; abajo están todas las noticias." : "Hoy no hubo noticias aquí."}</p>`}
+        ${resto.length ? html`<section>
+          <h2>${relevante.length ? "Más noticias de hoy" : "Noticias de hoy"} <span class="cuenta">${resto.length}</span></h2>
+          <div class="noticias">${resto.map((h) => noticia(h, visto(h), { pagina: pagina(h), marca: marca(h) }))}</div>
+        </section>` : ""}
+        ${semana.length ? html`<details class="mas"${pestana.hoy.some(deLaHoja) ? "" : " open"}>
+          <summary>Antes en la semana (${semana.length})</summary>
+          <div class="noticias">${semana.map((h) => noticia(h, visto(h), { pagina: pagina(h), conFecha: true, marca: marca(h) }))}</div>
+        </details>` : ""}
+        ${pocoInteres.length ? html`<details class="mas">
+          <summary>De poco interés hoy (${pocoInteres.length})</summary>
+          <ul class="lista-compacta">${pocoInteres.map((p) => html`<li><a href="${enlaceLector(p)}">
+            <span class="articulo-titulo">${p.titulo}</span><span class="meta">${p.fuente}</span></a></li>`)}</ul>
+        </details>` : ""}
+        ${cerradas.length ? html`<details class="mas">
+          <summary>Historias cerradas (${cerradas.length})</summary>
+          <ul class="lista-compacta">${cerradas.map((h) => html`<li><a href="${enlaceHistoria(h.id)}">
+            <span class="articulo-titulo">${h.titulo}</span><span class="meta">Última novedad: ${fechaCorta(h.actualizada)}</span></a></li>`)}</ul>
+        </details>` : ""}
+        ${grupo === "Sectores" ? html`<p class="nota pie-hoy">Cada sector reúne lo que lo toca, venga del país o del área que sea, y lo que traen las fuentes del radar.
+          <a href="#/radar">El radar y sus fuentes →</a></p>` : ""}
+      </div>
+      ${columnaProfundizar(profundizar, guardadas, nombres)}
+    </div>
   `);
-  escucharSaltos();
-  marcar({ tipo: "visita", pagina: tarjeta.pagina });
+  escucharNoticias(profundizar, guardadas);
+  marcar({ tipo: "visita", pagina: hoja || pestana.pestana });
 }
 
 // ---------- Las noticias, que se abren ahí mismo ----------
@@ -1301,13 +1285,15 @@ function cuerpoNoticia(h, visto, pagina) {
   </div>`;
 }
 
-function noticia(h, visto, { titulo, pagina, conFecha } = {}) {
+// Con marca ("En Hoy", "Ya la leíste"), la noticia sale apagada y señalada.
+function noticia(h, visto, { titulo, pagina, conFecha, marca } = {}) {
   const estado = visto ? estadoDeHistoria(h, visto) : null;
   const meta = [fuentesTexto(h.fuentes.length), pagina?.nombre, conFecha ? fechaCorta(h.actualizada) : ""].filter(Boolean).join(" · ");
-  return html`<details class="noticia" data-historia="${h.id}">
+  return html`<details class="noticia${marca ? " apagada" : ""}" data-historia="${h.id}">
     <summary>
       <span class="noticia-titulo">${titulo || h.titulo}</span>
-      <span class="noticia-meta">${estado && estado !== "aldia" ? html`<span class="insignia insignia-${estado}">${ESTADOS_HISTORIA[estado]}</span>` : ""}${meta}</span>
+      <span class="noticia-meta">${marca ? html`<span class="insignia insignia-vista">${marca}</span>`
+        : estado && estado !== "aldia" ? html`<span class="insignia insignia-${estado}">${ESTADOS_HISTORIA[estado]}</span>` : ""}${meta}</span>
     </summary>
     ${cuerpoNoticia(h, visto, pagina)}
   </details>`;
@@ -1375,66 +1361,24 @@ async function vistaHoyV2() {
   escucharNoticias(inicio.profundizar, guardadas);
 }
 
-// ---------- Cada página: lo relevante, todas las noticias y para profundizar ----------
+// ---------- Las direcciones de una página llevan a su subpestaña ----------
+// #/p/pais-colombia abre América Latina con el filtro de Colombia; así siguen sirviendo los
+// enlaces "Más de Colombia →" y los que ya estaban guardados.
 
 async function vistaPagina(pid) {
   const indice = await leerJSON("datos/v2/indice.json");
-  const tarjeta = indice.paginas.find((t) => t.pagina === pid);
-  if (!tarjeta) throw new Error("No existe esa página.");
-  resaltar(VISTA_DE_GRUPO[tarjeta.grupo]);
-  if (tarjeta.grilla) return vistaGrillaHijas(tarjeta, indice);
-  const [pagina, { visitas, leidas }, guardadas] = await Promise.all([
-    leerJSON(`datos/v2/paginas/${pid}.json`), marcasV2(), piezasGuardadas()]);
-  const visita = visitas.get(pid);
-  const visto = (h) => masReciente(leidas.get(h.id), visita);
-  const padre = pagina.padre && indice.paginas.find((t) => t.pagina === pagina.padre);
-  const deOtroDia = pagina.fecha_lectura && pagina.fecha_lectura !== pagina.dia;
-  pintar(html`
-    <div class="dos-columnas">
-      <div class="principal">
-        <header class="encabezado-vista">
-          ${padre ? html`<a class="volver" href="${enlacePagina(padre.pagina)}">← ${padre.nombre}</a>`
-            : html`<a class="volver" href="#/${VISTA_DE_GRUPO[pagina.grupo]}">← ${pagina.grupo}</a>`}
-          <h1>${pagina.nombre}</h1>
-          <p class="meta">${[pagina.seccion !== pagina.nombre ? pagina.seccion : "", fechaLarga(pagina.dia),
-            visita ? `tu última visita: ${fechaLarga(visita, true)}` : ""].filter(Boolean).join(" · ")}</p>
-        </header>
-        ${pagina.lectura ? html`<section class="lo-relevante">
-          <p class="sobretitulo">Lo relevante${deOtroDia ? ` · ${fechaLarga(pagina.fecha_lectura)}` : ""}</p>
-          <div class="cuerpo">${seguro(markdownAHtml(pagina.lectura))}</div>
-          ${pagina.lectura_claude ? html`<p class="lectura-claude"><em>Lectura de Claude: ${pagina.lectura_claude}</em></p>` : ""}
-        </section>` : ""}
-        <section>
-          <h2>Noticias de hoy <span class="cuenta">${pagina.hoy.length}</span></h2>
-          ${pagina.hoy.length ? html`<div class="noticias">${pagina.hoy.map((h) => noticia(h, visto(h)))}</div>`
-            : html`<p class="nota">Hoy no hubo noticias aquí.</p>`}
-        </section>
-        ${pagina.semana.length ? html`<details class="mas"${pagina.hoy.length ? "" : " open"}>
-          <summary>Antes en la semana (${pagina.semana.length})</summary>
-          <div class="noticias">${pagina.semana.map((h) => noticia(h, visto(h), { conFecha: true }))}</div>
-        </details>` : ""}
-        ${pagina.poco_interes.length ? html`<details class="mas">
-          <summary>De poco interés hoy (${pagina.poco_interes.length})</summary>
-          <ul class="lista-compacta">${pagina.poco_interes.map((p) => html`<li><a href="${enlaceLector(p)}">
-            <span class="articulo-titulo">${p.titulo}</span><span class="meta">${p.fuente}</span></a></li>`)}</ul>
-        </details>` : ""}
-        ${pagina.cerradas.length ? html`<details class="mas">
-          <summary>Historias cerradas (${pagina.cerradas.length})</summary>
-          <ul class="lista-compacta">${pagina.cerradas.map((h) => html`<li><a href="${enlaceHistoria(h.id)}">
-            <span class="articulo-titulo">${h.titulo}</span><span class="meta">Última novedad: ${fechaCorta(h.actualizada)}</span></a></li>`)}</ul>
-        </details>` : ""}
-      </div>
-      ${columnaProfundizar(pagina.profundizar, guardadas)}
-    </div>
-  `);
-  escucharNoticias(pagina.profundizar, guardadas);
-  marcar({ tipo: "visita", pagina: pid });
+  const pestana = indice.pestanas.find((p) => p.pestana === pid || p.hojas.includes(pid));
+  if (!pestana) throw new Error("No existe esa página.");
+  const filtro = pestana.hojas.length > 1 && pestana.hojas.includes(pid) ? `/${pid}` : "";
+  location.replace(`#/${VISTA_DE_GRUPO[pestana.grupo]}/${pestana.slug}${filtro}`);
 }
 
 // ---------- Una historia completa y el grafo latente ----------
 
 async function vistaHistoria(id) {
   const indice = await leerJSON("datos/v2/indice.json");
+  // Una historia que se juntó con otra lleva a esa.
+  if (indice.fusionadas?.[id]) return location.replace(enlaceHistoria(indice.fusionadas[id]));
   const pid = indice.historias[id];
   if (!pid) throw new Error("No se encontró esa historia.");
   resaltar(VISTA_DE_GRUPO[indice.paginas.find((t) => t.pagina === pid)?.grupo]);
@@ -1520,9 +1464,9 @@ function vistaNuevo(ruta) {
 
 const VISTAS = {
   hoy: vistaHoyV2,
-  geografia: () => vistaGrupo("geografia"),
-  areas: () => vistaGrupo("areas"),
-  sectores: () => vistaGrupo("sectores"),
+  geografia: (ruta) => vistaPestanas("geografia", ruta),
+  areas: (ruta) => vistaPestanas("areas", ruta),
+  sectores: (ruta) => vistaPestanas("sectores", ruta),
   p: vistaPagina,
   h: vistaHistoria,
   e: vistaEntidad,

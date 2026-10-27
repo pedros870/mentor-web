@@ -755,64 +755,49 @@ a.chip { display: inline-block; text-decoration: none; }
 }
 .tarjeta-pie { margin-top: auto; font-size: 0.8rem; font-weight: 600; color: var(--acento); }
 
-/* Geografía, Áreas y Sectores: un mural de tarjetas con lo relevante completo, en columnas sin huecos. */
-.mural { columns: 21rem; column-gap: 1rem; }
-.tarjeta-mural {
-  display: flow-root;
-  break-inside: avoid;
-  margin: 0 0 1rem;
-  padding: 1rem 1.15rem 0.9rem;
-  background: var(--superficie);
-  border: 1px solid var(--borde);
-  border-radius: 14px;
-  box-shadow: var(--sombra);
-}
-.mural-nombre { font-family: var(--serif); font-size: 1.25rem; font-weight: 600; line-height: 1.25; margin: 0 0 0.5rem; }
-.mural-nombre a { color: inherit; text-decoration: none; }
-.mural-nombre a:hover { color: var(--acento); }
-.mural-fecha { margin: -0.25rem 0 0.5rem; font-size: 0.82rem; color: var(--texto-suave); }
-.mural-texto { font-size: 0.98rem; line-height: 1.55; }
-.mural-texto p { margin: 0 0 0.65em; }
-.mural-lista { list-style: none; margin: 0 0 0.5rem; padding: 0; font-size: 0.95rem; line-height: 1.5; }
-.mural-lista li { padding: 0.45rem 0; border-top: 1px solid var(--borde); }
-.mural-lista li:first-child { border-top: 0; padding-top: 0; }
-.mural-lista a { font-weight: 600; text-decoration: none; }
-.mural-pie { display: inline-block; margin-top: 0.1rem; font-size: 0.85rem; font-weight: 600; color: var(--acento); text-decoration: none; }
-.mural-pie:hover { text-decoration: underline; }
-
-/* Sin noticias hoy, pero sí en la semana: su último resumen, apagado. */
-.tarjeta-mural.quieta { background: transparent; box-shadow: none; }
-.tarjeta-mural.quieta .mural-texto { color: var(--texto-suave); }
-.sin-noticias { margin: 0.25rem 0 0; font-size: 0.9rem; color: var(--texto-suave); }
-.sin-noticias a { color: inherit; }
-
-/* Saltos entre secciones: una barra pegada debajo de la cabecera, que se desliza en el celular. */
-.saltos {
-  position: sticky;
-  top: var(--alto-cabecera, 3.75rem);
-  z-index: 5;
+/* Geografía, Áreas y Sectores: subpestañas que se leen como Hoy. En el celular la fila se desliza. */
+.encabezado-pestanas { margin: 0.5rem auto 1.75rem; }
+.pestanas {
   display: flex;
-  gap: 0.4rem;
+  gap: 0.15rem;
   overflow-x: auto;
   scrollbar-width: none;
-  margin: 0 -16px 1.5rem;
-  padding: 0.6rem 16px;
-  background: var(--fondo);
+  margin: 0.6rem -16px 0;
+  padding: 0 16px;
   border-bottom: 1px solid var(--borde);
 }
-.saltos button {
+.pestanas::-webkit-scrollbar { display: none; }
+.pestanas a {
   flex: none;
-  padding: 0.35rem 0.8rem;
-  border: 1px solid var(--borde);
-  border-radius: 999px;
-  background: var(--superficie);
-  color: var(--texto);
-  font: 500 0.88rem var(--sans);
-  cursor: pointer;
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--texto-suave);
+  font: 500 0.95rem var(--sans);
+  text-decoration: none;
 }
-.saltos button:hover { border-color: var(--acento); color: var(--acento); }
-.saltos button.vacia { background: transparent; color: var(--texto-suave); }
-.seccion-grilla { scroll-margin-top: calc(var(--alto-cabecera, 3.75rem) + 4rem); }
+.pestanas a:hover { color: var(--texto); }
+.pestanas a[aria-current="page"] { color: var(--acento); border-bottom-color: var(--acento); font-weight: 600; }
+.pestanas .cuenta { margin-left: 0; font-size: 0.78rem; }
+
+@media (min-width: 1000px) {
+  .encabezado-pestanas { max-width: 70.5rem; }
+  .pestanas { flex-wrap: wrap; overflow: visible; margin: 0.6rem 0 0; padding: 0; }
+}
+
+.filtros-pestana { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: -0.25rem 0 1.25rem; }
+.filtros-pestana .chip { text-decoration: none; padding: 0.3rem 0.7rem; font-size: 0.85rem; }
+.filtros-pestana .chip.sin-hoy { color: var(--texto-suave); background: transparent; }
+.filtros-pestana .chip[aria-current="page"] { background: var(--texto); color: var(--fondo); border-color: var(--texto); }
+.filtros-pestana .chip[aria-current="page"] span { color: inherit; opacity: 0.7; }
+
+/* Lo que ya está en Hoy o ya se leyó: sigue ahí, apagado y señalado. */
+details.noticia.apagada .noticia-titulo { color: var(--texto-suave); }
+.relevante details.noticia.apagada > summary::before { background: var(--borde); color: var(--texto-suave); }
+.insignia-vista { border-style: dashed; }
 
 /* Página de lectura: lo relevante y las noticias a la izquierda, para profundizar a la derecha. */
 .dos-columnas { display: grid; gap: 2rem; }
@@ -844,9 +829,6 @@ a.chip { display: inline-block; text-decoration: none; }
 .lista-profundizar .razon { margin: 0.35rem 0 0; font-style: normal; }
 .lista-profundizar .acciones-lectura .boton-secundario { padding: 0.3rem 0.7rem; font-size: 0.82rem; }
 
-.lo-relevante { margin: 0 0 2rem; }
-.lo-relevante .cuerpo { font-size: 1.12rem; }
-.lo-relevante .cuerpo p:last-child { margin-bottom: 0.5rem; }
 .lectura-claude { color: var(--texto-suave); }
 .pie-hoy { margin-top: 1.5rem; font-size: 0.85rem; }
 
