@@ -908,3 +908,66 @@ details.mas > .noticias, details.mas > .lista-compacta { margin-top: 0.5rem; }
 .lista-compacta a .insignia { align-self: flex-start; margin: 0 0 0.25rem; }
 
 .guardadas { margin: 0 0 1.5rem; }
+
+/* ---------- Cuaderno: lo que Pedro le deja a Claude ---------- */
+
+.form-cuaderno { display: grid; gap: 0.6rem; }
+.form-cuaderno textarea, .form-cuaderno input {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  background: var(--fondo);
+  color: var(--texto);
+  font: inherit;
+  font-size: 0.98rem;
+}
+.form-cuaderno .boton { justify-self: start; }
+.rapidas, .clases-cuaderno { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+.rapidas .chip, .clases-cuaderno .chip { padding: 0.3rem 0.7rem; font-size: 0.82rem; }
+
+details.preguntar, details.seguir { border-top: 0; padding: 0; }
+details.preguntar { margin: 0.25rem 0 0.75rem; }
+details.preguntar > summary, details.seguir > summary {
+  list-style: none;
+  color: var(--acento);
+  font-size: 0.9rem;
+  padding: 0.3rem 0;
+}
+details.preguntar > summary::-webkit-details-marker, details.seguir > summary::-webkit-details-marker { display: none; }
+details.preguntar > summary::before { content: "? "; }
+details.preguntar[open] > summary, details.seguir[open] > summary { margin-bottom: 0.6rem; }
+
+.hilo { padding: 0.9rem 0; border-top: 1px solid var(--borde); }
+.noticia-cuerpo .hilo:first-of-type, .preguntas-historia .hilo:first-of-type { border-top: 0; padding-top: 0.25rem; }
+.hilo.archivado { opacity: 0.7; }
+.contexto-hilo { margin: 0 0 0.5rem; font-size: 0.85rem; color: var(--texto-suave); }
+.turno { margin: 0 0 0.75rem; }
+.turno p { margin: 0 0 0.2rem; }
+.turno-pedro .oracion { color: var(--texto-suave); font-style: italic; }
+.turno-claude { padding: 0.7rem 0.9rem; border-radius: 10px; background: var(--acento-suave); }
+.turno-claude .sobretitulo { margin: 0 0 0.3rem; color: var(--acento); }
+.turno-claude .cuerpo { font-size: 1rem; line-height: 1.6; }
+.turno-claude .cuerpo p { margin: 0 0 0.6em; }
+.turno-claude .cuerpo p:last-child { margin-bottom: 0; }
+.pendiente { margin: 0 0 0.5rem; font-size: 0.88rem; font-style: italic; color: var(--texto-suave); }
+.acciones-hilo { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 1.25rem; }
+.acciones-hilo details.seguir[open] { flex-basis: 100%; }
+.acciones-hilo .boton-texto { font-size: 0.85rem; color: var(--texto-suave); }
+.seccion-cuaderno { margin: 2rem 0 0; }
+.preguntas-lector { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--borde); }
+.preguntas-lector h2, .preguntas-historia h2 { margin-bottom: 0.3rem; }
+
+.boton-palabra {
+  position: absolute;
+  z-index: 20;
+  padding: 0.45rem 0.85rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--acento);
+  color: var(--acento-texto);
+  font: 600 0.85rem var(--sans);
+  box-shadow: var(--sombra);
+  cursor: pointer;
+}
+.boton-palabra[hidden] { display: none; }

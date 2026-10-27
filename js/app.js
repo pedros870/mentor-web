@@ -1,5 +1,5 @@
 // Mentor: la interfaz de lectura. Una sola página con vistas por dirección
-// (#/hoy, #/geografia, #/areas, #/sectores, #/p/…, #/h/…, #/leer/…, #/para-leer, #/vocabulario, #/estado…).
+// (#/hoy, #/geografia, #/areas, #/sectores, #/p/…, #/h/…, #/leer/…, #/para-leer, #/cuaderno, #/estado…).
 import { ErrorDeDatos, REPO_POR_DEFECTO, borrarConfig, config, guardarConfig, leerJSON, leerTexto, modoLocal } from "./datos.js";
 import { enLinea, escapar, markdownAHtml, separarFicha } from "./markdown.js";
 import { alCambiar, enviar, estadoDeEnvio, marcar, todasLasMarcas } from "./marcas.js";
@@ -466,7 +466,9 @@ async function vistaLector(ruta) {
     .replace(/^\s*# .*\n/, "") // el título ya va en la cabecera
     .replace(/\n---\n\nSolo se obtuvo el extracto[\s\S]*$/, "");
   const extracto = ficha.extraccion === "extracto";
-  const [resumen, lectura] = await Promise.all([leerResumen().catch(() => null), estadoDeLectura()]);
+  const [resumen, lectura, cuadernoLector] = await Promise.all([leerResumen().catch(() => null), estadoDeLectura(),
+    leerCuaderno().catch(() => [])]);
+  const hilosDeLaPieza = hilosDe(cuadernoLector).filter((x) => x[0].archivo === ruta && x[0].clase !== "palabra" && !x[0].archivada);
   const clasificacion = resumen?.titulares.find((t) => t.archivo === ruta);
   // Lo que el sistema recomendó leer completo (y lo de Para leer) se califica con
   // "¿valió la pena?" (mide si acierta); lo demás, con "¿te sirvió?" (mide lo que se está perdiendo).
@@ -477,7 +479,7 @@ async function vistaLector(ruta) {
   const leido = lectura.leidos.has(ruta);
   marcar({ tipo: "abierto", archivo: ruta });
   pintar(html`
-    <article class="lector">
+    <article class="lector" data-archivo="${ruta}" data-titulo="${ficha.titulo}">
       ${deLaBiblioteca ? html`<a class="volver" href="#/para-leer">← Para leer</a>` : html`<a class="volver" href="#/hoy">← Hoy</a>`}
       <header>
         <p class="sobretitulo">${ficha.fuente}${ficha.categoria_inicial ? ` · ${ficha.categoria_inicial}` : ""}</p>
@@ -498,6 +500,13 @@ async function vistaLector(ruta) {
           <textarea id="nota" rows="3">${lectura.notas.get(ruta) || ""}</textarea>
         </label>
         <button class="boton" type="button" id="guardar-nota">Guardar nota</button>
+      </section>
+      <section class="preguntas-lector">
+        <h2>Pregúntale a Claude</h2>
+        <p class="meta">Selecciona una palabra o una frase del texto para guardarla en el vocabulario.</p>
+        ${hilosDeLaPieza.map((x) => hilo(x, { conContexto: false }))}
+        <details class="preguntar"><summary>Preguntar sobre esta pieza</summary>
+          ${formularioCuaderno({ archivo: ruta, titulo: ficha.titulo, rapidas: true })}</details>
       </section>
       <footer class="pie-lector">
         <a class="boton-secundario" href="${ficha.url}" target="_blank" rel="noopener noreferrer">Abrir el original ↗</a>
@@ -971,21 +980,222 @@ async function vistaRadar() {
   `);
 }
 
-// ---------- Vocabulario ----------
+// ---------- Cuaderno: lo que Pedro le deja a Claude ----------
+// Preguntas sobre una noticia o una pieza, palabras para el vocabulario y pedidos para Mentor.
+// Llegan como marcas; Claude Code las responde en una sesión de Pedro (/cuaderno), sin gastar
+// API, y las respuestas quedan en datos/cuaderno/respuestas.jsonl. Como las marcas se leen
+// de los últimos días, cada noche se copia todo lo del cuaderno a datos/cuaderno/entradas.json.
 
-async function vistaVocabulario() {
+const CLASES_CUADERNO = { pregunta: "Pregunta", palabra: "Palabra", pedido: "Pedido para Mentor" };
+const ESTADOS_RESPUESTA = { hecho: "Hecho", en_curso: "En curso", descartado: "Descartado" };
+const INVITACIONES = {
+  pregunta: "Tu pregunta para Claude…",
+  palabra: "La palabra o la frase…",
+  pedido: "Qué quieres que cambie o se agregue en Mentor…",
+};
+const PREGUNTAS_RAPIDAS = ["¿Qué implicaciones tiene?", "¿Qué significa para Colombia?", "¿Qué contexto me falta?",
+  "¿Qué puede pasar ahora?"];
+
+async function leerCuaderno() {
+  const [copia, marcas, texto] = await Promise.all([
+    leerJSON("datos/cuaderno/entradas.json").catch(() => ({ marcas: [] })), todasLasMarcas(),
+    leerTexto("datos/cuaderno/respuestas.jsonl").catch(() => "")]);
+  const respuestas = new Map();
+  for (const linea of texto.split("\n")) {
+    if (!linea.trim()) continue;
+    try {
+      const r = JSON.parse(linea);
+      respuestas.set(r.entrada, [...(respuestas.get(r.entrada) || []), r]);
+    } catch { /* línea dañada */ }
+  }
+  const delCuaderno = new Map([...copia.marcas, ...marcas.filter((m) => m.tipo?.startsWith("cuaderno") && m.id)]
+    .map((m) => [m.id, m]));
+  const todas = [...delCuaderno.values()].sort((a, b) => a.ts.localeCompare(b.ts));
+  const archivadas = new Map(todas.filter((m) => m.tipo === "cuaderno_archivar").map((m) => [m.entrada, m.valor !== false]));
+  return todas.filter((m) => m.tipo === "cuaderno")
+    .map((m) => ({ ...m, respuestas: respuestas.get(m.id) || [], archivada: archivadas.get(m.id) || false }));
+}
+
+// Los hilos: cada entrada con las que siguieron la conversación, en orden.
+function hilosDe(entradas) {
+  const porId = new Map(entradas.map((e) => [e.id, e]));
+  const raiz = (e) => (e.sigue && porId.has(e.sigue) ? raiz(porId.get(e.sigue)) : e);
+  return [...agrupar(entradas, (e) => raiz(e).id).values()];
+}
+
+const pendienteHilo = (hilo) => !hilo.at(-1).respuestas.length;
+
+// Las preguntas que ya se hicieron sobre cada historia, para mostrarlas al abrirla.
+let hilosPorHistoria = new Map();
+async function cargarHilosPorHistoria() {
+  const hilos = hilosDe(await leerCuaderno().catch(() => []));
+  hilosPorHistoria = agrupar(hilos.filter((h) => h[0].historia && !h[0].archivada), (h) => h[0].historia);
+}
+
+function formularioCuaderno({ clase = "pregunta", historia = "", archivo = "", titulo = "", sigue = "", rapidas = false, conClase = false } = {}) {
+  return html`<form class="form-cuaderno" data-clase="${clase}" data-historia="${historia}" data-archivo="${archivo}"
+      data-titulo="${titulo}" data-sigue="${sigue}">
+    ${conClase ? html`<div class="clases-cuaderno" role="group" aria-label="Qué le dejas a Claude">${Object.entries(CLASES_CUADERNO)
+      .map(([k, v]) => html`<button type="button" class="chip" data-clase-cuaderno="${k}" aria-pressed="${String(k === clase)}">${v}</button>`)}</div>` : ""}
+    ${rapidas ? html`<div class="rapidas">${PREGUNTAS_RAPIDAS.map((p) => html`<button type="button" class="chip" data-rapida="${p}">${p}</button>`)}</div>` : ""}
+    <textarea name="texto" rows="2" required placeholder="${INVITACIONES[clase]}"></textarea>
+    ${conClase ? html`<input name="oracion" type="text" placeholder="La oración donde la viste (opcional)" hidden>` : ""}
+    <button class="boton" type="submit">Dejar en el Cuaderno</button>
+  </form>`;
+}
+
+function contextoDeHilo(e) {
+  if (e.historia) return html`<p class="contexto-hilo">Sobre <a href="${enlaceHistoria(e.historia)}">${e.titulo || "la historia"}</a></p>`;
+  if (e.archivo) return html`<p class="contexto-hilo">Sobre <a href="${enlaceLector(e)}">${e.titulo || "la pieza"}</a></p>`;
+  return "";
+}
+
+function hilo(entradas, { conContexto = true, desde } = {}) {
+  const [raiz] = entradas;
+  return html`<article class="hilo${raiz.archivada ? " archivado" : ""}">
+    ${conContexto ? contextoDeHilo(raiz) : ""}
+    ${entradas.map((e) => html`<div class="turno turno-pedro">
+        ${e.clase === "palabra" ? html`<p><strong>${e.texto}</strong>${e.oracion ? html` <span class="oracion">«${e.oracion}»</span>` : ""}</p>`
+          : html`<p>${e.texto}</p>`}
+        <span class="meta">${fechaLarga(e.ts, true)}</span>
+      </div>
+      ${e.respuestas.map((r) => html`<div class="turno turno-claude">
+        <p class="sobretitulo">Claude${ESTADOS_RESPUESTA[r.estado] ? ` · ${ESTADOS_RESPUESTA[r.estado]}` : ""}${
+          desde && despues(r.ts, desde) ? html` <span class="insignia insignia-nueva">Nueva</span>` : ""}</p>
+        <div class="cuerpo">${seguro(markdownAHtml(r.texto))}</div>
+      </div>`)}`)}
+    ${pendienteHilo(entradas) ? html`<p class="pendiente">Por responder: Claude lo responde en la próxima sesión de Claude Code.</p>` : ""}
+    <div class="acciones-hilo">
+      <details class="seguir"><summary>Seguir la conversación</summary>${formularioCuaderno({ sigue: entradas.at(-1).id })}</details>
+      <button class="boton-texto" type="button" data-archivar="${raiz.id}" data-valor="${String(!raiz.archivada)}">${raiz.archivada ? "Sacar del archivo" : "Archivar"}</button>
+    </div>
+  </article>`;
+}
+
+// Al final de cada noticia que se abre: lo que ya se preguntó y el formulario para preguntar.
+function preguntarSobre(h) {
+  const hilos = hilosPorHistoria.get(h.id) || [];
+  return html`${hilos.map((x) => hilo(x, { conContexto: false }))}
+    <details class="preguntar"><summary>Preguntarle a Claude</summary>
+      ${formularioCuaderno({ historia: h.id, titulo: h.titulo, rapidas: true })}</details>`;
+}
+
+async function vistaCuaderno() {
+  const [entradas, { visitas }] = await Promise.all([leerCuaderno(), marcasV2()]);
+  const desde = visitas.get("cuaderno");
+  const hilos = hilosDe(entradas).sort((a, b) => b.at(-1).ts.localeCompare(a.at(-1).ts));
+  const activos = hilos.filter((x) => !x[0].archivada);
+  const pendientes = activos.filter(pendienteHilo);
+  const respondidos = (clase) => activos.filter((x) => x[0].clase === clase && !pendienteHilo(x));
+  const archivados = hilos.filter((x) => x[0].archivada);
+  const seccion = (titulo, lista, vacio) => html`<section class="seccion-cuaderno">
+    <h2>${titulo} <span class="cuenta">${lista.length}</span></h2>
+    ${lista.length ? lista.map((x) => hilo(x, { desde })) : html`<p class="nota">${vacio}</p>`}
+  </section>`;
   pintar(html`
     <header class="encabezado-vista">
-      <p class="sobretitulo">Repaso del día</p>
-      <h1>Vocabulario</h1>
+      <p class="sobretitulo">Lo que conversamos</p>
+      <h1>Cuaderno</h1>
+      <p class="meta">Lo que dejes aquí, en una noticia o en el lector, lo responde Claude en la próxima sesión de Claude Code
+        (escribe <strong>/cuaderno</strong>). No gasta API y todo queda guardado.</p>
     </header>
-    <section class="vacio">
-      <p>Aún no hay palabras guardadas.</p>
-      <p class="meta">Cuando llegue la etapa del vocabulario, seleccionas una palabra en el lector y la guardas
-        con su oración. Claude te da el significado en contexto y aquí repasas cinco minutos al día.</p>
-    </section>
+    <section class="tarjeta">${formularioCuaderno({ conClase: true })}</section>
+    ${pendientes.length ? seccion("Por responder", pendientes, "") : ""}
+    ${seccion("Preguntas", respondidos("pregunta"), "Las preguntas que le hagas a Claude sobre una noticia aparecen aquí con su respuesta.")}
+    ${seccion("Vocabulario", respondidos("palabra"), "En el lector, selecciona una palabra o una frase y toca \"Guardar en vocabulario\". El repaso diario llega cuando haya palabras.")}
+    ${seccion("Pedidos para Mentor", respondidos("pedido"), "Lo que quieras cambiar o agregar en Mentor.")}
+    ${archivados.length ? html`<details class="mas"><summary>Archivado (${archivados.length})</summary>
+      ${archivados.map((x) => hilo(x))}</details>` : ""}
   `);
+  marcar({ tipo: "visita", pagina: "cuaderno" });
 }
+
+// Un solo oyente para todos los formularios del cuaderno, estén en la vista que estén.
+contenido.addEventListener("submit", (evento) => {
+  const form = evento.target.closest(".form-cuaderno");
+  if (!form) return;
+  evento.preventDefault();
+  const texto = form.texto.value.trim();
+  if (!texto) return;
+  const { clase, historia, archivo, titulo, sigue } = form.dataset;
+  const oracion = clase === "palabra" ? form.oracion?.value.trim() : "";
+  marcar({ tipo: "cuaderno", clase, texto, ...Object.fromEntries(
+    Object.entries({ historia, archivo, titulo, sigue, oracion }).filter(([, v]) => v)) });
+  form.reset();
+  avisar("Quedó en el Cuaderno");
+  if (location.hash.startsWith("#/cuaderno")) vistaCuaderno();
+  else form.insertAdjacentHTML("beforebegin", '<p class="pendiente">Quedó en el Cuaderno. Claude lo responde en la próxima sesión de Claude Code.</p>');
+});
+
+contenido.addEventListener("click", (evento) => {
+  const rapida = evento.target.closest("[data-rapida]");
+  const clase = evento.target.closest("[data-clase-cuaderno]");
+  const archivar = evento.target.closest("[data-archivar]");
+  if (rapida) {
+    const campo = rapida.closest("form").texto;
+    campo.value = rapida.dataset.rapida;
+    campo.focus();
+  } else if (clase) {
+    const form = clase.closest("form");
+    form.dataset.clase = clase.dataset.claseCuaderno;
+    for (const b of form.querySelectorAll("[data-clase-cuaderno]")) b.setAttribute("aria-pressed", String(b === clase));
+    form.texto.placeholder = INVITACIONES[form.dataset.clase];
+    if (form.oracion) form.oracion.hidden = form.dataset.clase !== "palabra";
+  } else if (archivar) {
+    const valor = archivar.dataset.valor === "true";
+    marcar({ tipo: "cuaderno_archivar", entrada: archivar.dataset.archivar, valor });
+    avisar(valor ? "Archivado" : "Salió del archivo");
+    if (location.hash.startsWith("#/cuaderno")) vistaCuaderno();
+    else archivar.closest(".hilo").remove();
+  }
+});
+
+// En el lector, al seleccionar una palabra o una frase aparece "Guardar en vocabulario".
+const botonPalabra = document.createElement("button");
+botonPalabra.type = "button";
+botonPalabra.className = "boton-palabra";
+botonPalabra.textContent = "Guardar en vocabulario";
+botonPalabra.hidden = true;
+document.body.append(botonPalabra);
+let seleccion = null;
+
+// La oración donde está lo seleccionado, para que Claude dé el significado en su contexto.
+function oracionDe(rango, palabra) {
+  const bloque = rango.startContainer.parentElement?.closest("p, li, blockquote, td");
+  const texto = (bloque?.textContent || "").replace(/\s+/g, " ").trim();
+  const i = texto.indexOf(palabra);
+  if (i < 0) return texto.slice(0, 400);
+  const inicio = Math.max(...[". ", "? ", "! "].map((s) => texto.lastIndexOf(s, i))) + 1;
+  const finales = [". ", "? ", "! "].map((s) => texto.indexOf(s, i + palabra.length)).filter((n) => n >= 0);
+  const fin = finales.length ? Math.min(...finales) + 1 : texto.length;
+  return texto.slice(inicio, fin).trim().slice(0, 400);
+}
+
+document.addEventListener("selectionchange", () => {
+  const sel = document.getSelection();
+  const texto = sel?.toString().replace(/\s+/g, " ").trim() || "";
+  const cuerpo = contenido.querySelector(".lector > .cuerpo");
+  if (!cuerpo || !texto || texto.length > 80 || !sel.rangeCount || !cuerpo.contains(sel.anchorNode)) {
+    botonPalabra.hidden = true;
+    return;
+  }
+  const rango = sel.getRangeAt(0);
+  const caja = rango.getBoundingClientRect();
+  seleccion = { texto, oracion: oracionDe(rango, texto) };
+  botonPalabra.style.top = `${window.scrollY + caja.bottom + 10}px`;
+  botonPalabra.style.left = `${Math.max(8, Math.min(window.scrollX + caja.left, document.documentElement.clientWidth - 210))}px`;
+  botonPalabra.hidden = false;
+});
+botonPalabra.addEventListener("pointerdown", (evento) => evento.preventDefault()); // que no se pierda la selección
+botonPalabra.addEventListener("click", () => {
+  const lector = contenido.querySelector(".lector");
+  if (!seleccion || !lector) return;
+  marcar({ tipo: "cuaderno", clase: "palabra", texto: seleccion.texto, oracion: seleccion.oracion,
+    archivo: lector.dataset.archivo, titulo: lector.dataset.titulo });
+  avisar(`"${seleccion.texto}" quedó en el Cuaderno`);
+  document.getSelection().removeAllRanges();
+  botonPalabra.hidden = true;
+});
 
 // ---------- Estado ----------
 
@@ -1190,7 +1400,7 @@ async function vistaPestanas(clave, ruta) {
   const pestanas = indice.pestanas.filter((p) => p.grupo === grupo);
   const elegida = pestanas.find((p) => p.slug === slugPestana) || pestanas[0];
   const [pestana, { visitas, leidas }, guardadas] = await Promise.all([
-    leerJSON(`datos/v2/pestanas/${elegida.pestana}.json`), marcasV2(), piezasGuardadas()]);
+    leerJSON(`datos/v2/pestanas/${elegida.pestana}.json`), marcasV2(), piezasGuardadas(), cargarHilosPorHistoria()]);
   const paginas = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t]));
   const varias = pestana.hojas.length > 1;
   const hoja = varias && pestana.hojas.includes(filtro) ? filtro : null;
@@ -1280,6 +1490,7 @@ function cuerpoNoticia(h, visto, pagina) {
     ${h.que_sigue.length ? html`<p class="que-sigue-corto"><strong>Qué sigue:</strong> ${h.que_sigue.map((q) => `${q.cuando}: ${q.que}`).join(" · ")}</p>` : ""}
     <ul class="fuentes-noticia">${piezas.map((p) => html`<li><a href="${enlaceLector(p)}">${p.titulo}</a>
       <span class="meta">${p.fuente}${p.minutos ? ` · ${p.minutos} min` : ""}</span></li>`)}</ul>
+    ${preguntarSobre(h)}
     <p class="enlaces-noticia"><a href="${enlaceHistoria(h.id)}">Línea de tiempo, personas y conexiones →</a>${
       pagina ? html` <a href="${enlacePagina(pagina.pagina)}">Más de ${pagina.nombre} →</a>` : ""}</p>
   </div>`;
@@ -1340,7 +1551,7 @@ function escucharNoticias(profundizar, guardadas) {
 
 async function vistaHoyV2() {
   const [inicio, indice, { visitas, leidas }, guardadas] = await Promise.all([
-    leerJSON("datos/v2/inicio.json"), leerJSON("datos/v2/indice.json"), marcasV2(), piezasGuardadas()]);
+    leerJSON("datos/v2/inicio.json"), leerJSON("datos/v2/indice.json"), marcasV2(), piezasGuardadas(), cargarHilosPorHistoria()]);
   const paginas = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t]));
   const nombres = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t.nombre]));
   pintar(html`
@@ -1382,7 +1593,8 @@ async function vistaHistoria(id) {
   const pid = indice.historias[id];
   if (!pid) throw new Error("No se encontró esa historia.");
   resaltar(VISTA_DE_GRUPO[indice.paginas.find((t) => t.pagina === pid)?.grupo]);
-  const [pagina, { visitas, leidas }] = await Promise.all([leerJSON(`datos/v2/paginas/${pid}.json`), marcasV2()]);
+  const [pagina, { visitas, leidas }] = await Promise.all([leerJSON(`datos/v2/paginas/${pid}.json`), marcasV2(),
+    cargarHilosPorHistoria()]);
   const h = [...pagina.hoy, ...pagina.semana].find((x) => x.id === id)
     || (await leerJSON("datos/v2/historias.json")).historias[id];
   const visto = masReciente(leidas.get(id), visitas.get(pid));
@@ -1407,6 +1619,7 @@ async function vistaHistoria(id) {
         </section>
         ${h.que_sigue.length ? html`<section><h2>Qué sigue</h2>
           <ul class="que-sigue">${h.que_sigue.map((q) => html`<li><strong>${q.cuando}:</strong> ${q.que}</li>`)}</ul></section>` : ""}
+        <section class="preguntas-historia"><h2>Pregúntale a Claude</h2>${preguntarSobre(h)}</section>
         <section><h2>Las piezas (${piezas.length})</h2>
           <ul class="lista-compacta">${piezas.map((p) => html`<li><a href="${enlaceLector(p)}">
             <span class="insignia insignia-${p.recomendacion}">${RECOMENDACIONES[p.recomendacion]}</span>
@@ -1477,14 +1690,15 @@ const VISTAS = {
   clasificacion: () => vistaFuentes("articulos"),
   "para-leer": vistaParaLeer,
   radar: vistaRadar,
-  vocabulario: vistaVocabulario,
+  cuaderno: vistaCuaderno,
+  vocabulario: vistaCuaderno,
   estado: vistaEstado,
   conectar: vistaConectar,
 };
 // Las vistas que usan el ancho del computador; las demás quedan en una columna de lectura.
 const VISTAS_ANCHAS = new Set(["hoy", "geografia", "areas", "sectores", "p", "h", "e"]);
 // Qué sección de la barra se ilumina en las vistas que no tienen la suya.
-const NAVEGACION_DE = { leer: "hoy", anterior: "hoy", nuevo: "hoy", clasificacion: "fuentes" };
+const NAVEGACION_DE = { leer: "hoy", anterior: "hoy", nuevo: "hoy", clasificacion: "fuentes", vocabulario: "cuaderno" };
 
 const posiciones = {};
 let rutaActual = null;
@@ -1512,6 +1726,7 @@ async function enrutar() {
   contenido.classList.toggle("amplio", VISTAS_ANCHAS.has(vista));
   contenido.onclick = null;
   contenido.onchange = null;
+  botonPalabra.hidden = true;
   contenido.innerHTML = '<p class="cargando">Cargando…</p>';
   try {
     await VISTAS[vista](decodeURIComponent(resto.join("/")));
