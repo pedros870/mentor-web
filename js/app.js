@@ -1184,30 +1184,72 @@ function resaltar(vista) {
 }
 
 // ---------- Las grillas ----------
+// Cada tarjeta trae lo relevante completo, para leer de corrido sin entrar; entrar es para ver
+// las noticias. Las tarjetas se acomodan en columnas sin huecos: primero las que tuvieron
+// noticias hoy, luego las que solo tuvieron antes en la semana, con la fecha de su resumen.
+// Lo que no tiene nada que contar queda en una línea al final de su sección.
 
-function tarjetaPagina(t, visitas, dia) {
-  const visto = visitas.get(t.pagina);
+const conTarjeta = (t) => t.hoy > 0 || (!t.grilla && t.total > 0 && Boolean(t.lectura));
+
+function pieTarjeta(t, visto) {
+  if (!t.hoy) return `${noticiasTexto(t.total)} en la semana →`;
   const { nuevas, actualizadas } = contarNovedades(t, visto);
-  const texto = t.grilla
-    ? (t.movidas.length ? `Hoy: ${t.movidas.slice(0, 4).join(", ")}${t.movidas.length > 4 ? " y más" : ""}.` : "")
-    : t.tarjeta;
-  const deOtroDia = !t.grilla && t.tarjeta && t.fecha_lectura && t.fecha_lectura !== dia;
-  const pie = t.hoy
-    ? [`${noticiasTexto(t.hoy)} hoy`, visto && nuevas ? `${nuevas} nuevas` : "", visto && actualizadas ? `${actualizadas} con novedades` : ""]
-      .filter(Boolean).join(" · ")
-    : t.total ? `Última novedad: ${fechaCorta(t.actualizada)}` : "Sin noticias esta semana";
-  return html`<a class="tarjeta-pagina${t.hoy ? "" : " quieta"}${t.pagina === "pais-colombia" ? " ancha" : ""}" href="${enlacePagina(t.pagina)}">
-    <span class="tarjeta-nombre">${t.nombre}</span>
-    ${texto ? html`<span class="tarjeta-texto">${deOtroDia ? `${fechaCorta(t.fecha_lectura)}: ` : ""}${texto}</span>` : ""}
-    <span class="tarjeta-pie">${pie}</span>
-  </a>`;
+  return `${[`${noticiasTexto(t.hoy)} hoy`, visto && nuevas ? `${nuevas} nuevas` : "",
+    visto && actualizadas ? `${actualizadas} con novedades` : ""].filter(Boolean).join(" · ")} →`;
 }
 
-function grillas(tarjetas, visitas, dia) {
-  return [...agrupar(tarjetas, (t) => t.seccion || "")].map(([seccion, lista]) => html`<section class="seccion-grilla">
-    ${seccion && !(lista.length === 1 && lista[0].nombre === seccion) ? html`<h2>${seccion}</h2>` : ""}
-    <div class="grilla">${lista.map((t) => tarjetaPagina(t, visitas, dia))}</div>
-  </section>`);
+// Tecnologías disruptivas no tiene resumen propio: muestra el de cada tecnología que se movió.
+function tarjetaConHijas(t, paginas) {
+  const hijas = paginas.filter((h) => h.padre === t.pagina);
+  const movidas = hijas.filter((h) => h.hoy).sort((a, b) => b.hoy - a.hoy);
+  return html`<article class="tarjeta-mural">
+    <h3 class="mural-nombre"><a href="${enlacePagina(t.pagina)}">${t.nombre}</a></h3>
+    <ul class="mural-lista">${movidas.map((h) => html`<li><a href="${enlacePagina(h.pagina)}">${h.nombre}</a>${
+      h.tarjeta ? `: ${h.tarjeta}` : ""}</li>`)}</ul>
+    <a class="mural-pie" href="${enlacePagina(t.pagina)}">${noticiasTexto(t.hoy)} hoy en ${movidas.length} de ${hijas.length} tecnologías →</a>
+  </article>`;
+}
+
+function tarjetaPagina(t, visitas, dia, paginas) {
+  if (t.grilla) return tarjetaConHijas(t, paginas);
+  const texto = t.lectura || t.tarjeta;
+  const deOtroDia = texto && t.fecha_lectura && t.fecha_lectura !== dia;
+  return html`<article class="tarjeta-mural${t.hoy ? "" : " quieta"}">
+    <h3 class="mural-nombre"><a href="${enlacePagina(t.pagina)}">${t.nombre}</a></h3>
+    ${deOtroDia ? html`<p class="mural-fecha">Lo último, del ${fechaCorta(t.fecha_lectura)}</p>` : ""}
+    ${texto ? html`<div class="mural-texto">${seguro(markdownAHtml(texto))}</div>` : ""}
+    <a class="mural-pie" href="${enlacePagina(t.pagina)}">${pieTarjeta(t, visitas.get(t.pagina))}</a>
+  </article>`;
+}
+
+function grillas(tarjetas, visitas, dia, paginas) {
+  const secciones = [...agrupar(tarjetas, (t) => t.seccion || "")];
+  const conNombre = ([seccion, lista]) => seccion && !(lista.length === 1 && lista[0].nombre === seccion);
+  // Con muchas secciones, la página es larga: una barra fija para saltar entre ellas.
+  const saltos = secciones.length > 3 ? html`<nav class="saltos" aria-label="Secciones">${secciones.map(([seccion, lista], i) => {
+    const hoy = lista.reduce((n, t) => n + t.hoy, 0);
+    return html`<button type="button" class="${hoy ? "" : "vacia"}" data-salto="seccion-${i}">${seccion}<span class="cuenta">${hoy}</span></button>`;
+  })}</nav>` : "";
+  return html`${saltos}${secciones.map(([seccion, lista], i) => {
+    const visibles = [...lista.filter((t) => t.hoy), ...lista.filter((t) => !t.hoy && conTarjeta(t))];
+    const quietas = lista.filter((t) => !conTarjeta(t));
+    return html`<section class="seccion-grilla" id="seccion-${i}">
+      ${conNombre([seccion, lista]) ? html`<h2>${seccion}</h2>` : ""}
+      ${visibles.length ? html`<div class="mural">${visibles.map((t) => tarjetaPagina(t, visitas, dia, paginas))}</div>` : ""}
+      ${quietas.length ? html`<p class="sin-noticias">Sin noticias hoy: ${quietas.map((t, j) =>
+        html`${j ? " · " : ""}<a href="${enlacePagina(t.pagina)}">${t.nombre}</a>`)}</p>` : ""}
+    </section>`;
+  })}`;
+}
+
+// La barra de saltos queda pegada debajo de la cabecera, que cambia de alto entre celular y computador.
+function escucharSaltos() {
+  const cabecera = document.querySelector(".cabecera");
+  if (cabecera) document.documentElement.style.setProperty("--alto-cabecera", `${cabecera.offsetHeight}px`);
+  contenido.onclick = (evento) => {
+    const boton = evento.target.closest("[data-salto]");
+    if (boton) document.getElementById(boton.dataset.salto)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 }
 
 async function vistaGrupo(clave) {
@@ -1219,10 +1261,11 @@ async function vistaGrupo(clave) {
       <p class="sobretitulo">${fechaLarga(indice.dia)} · ${noticiasTexto(tarjetas.reduce((n, t) => n + t.hoy, 0))} hoy</p>
       <h1>${grupo}</h1>
     </header>
-    ${grillas(tarjetas, visitas, indice.dia)}
+    ${grillas(tarjetas, visitas, indice.dia, indice.paginas)}
     ${grupo === "Sectores" ? html`<p class="nota">Cada sector reúne lo que lo toca, venga del país o del área que sea, y lo que traen las fuentes del radar.
       <a href="#/radar">El radar y sus fuentes →</a></p>` : ""}
   `);
+  escucharSaltos();
 }
 
 async function vistaGrillaHijas(tarjeta, indice) {
@@ -1234,8 +1277,9 @@ async function vistaGrillaHijas(tarjeta, indice) {
       <h1>${tarjeta.nombre}</h1>
       <p class="meta">${noticiasTexto(tarjeta.hoy)} hoy, en ${tarjeta.movidas.length} de ${hijas.length} tecnologías</p>
     </header>
-    ${grillas(hijas, visitas, indice.dia)}
+    ${grillas(hijas, visitas, indice.dia, indice.paginas)}
   `);
+  escucharSaltos();
   marcar({ tipo: "visita", pagina: tarjeta.pagina });
 }
 
