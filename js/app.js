@@ -879,11 +879,14 @@ async function vistaParaLeer() {
   };
   const conDestino = (l) => ({ l, destino: destinoDeLectura(l, enlaces[l.id], biblioteca[l.id]), guardada: biblioteca[l.id],
     segundo: enlaces[l.id]?.enlace_2, leida: false });
-  const pendientes = lecturas
+  const enOrden = lecturas
     .filter((l) => l.momento_final !== "Ya leído" && !leida(l))
     .sort((a, b) => (ORDEN_MOMENTO[a.momento_final] ?? 9) - (ORDEN_MOMENTO[b.momento_final] ?? 9)
       || (a.horas_estimadas ?? 99) - (b.horas_estimadas ?? 99))
     .map(conDestino);
+  // Las actividades de la hoja Recomendaciones (un grupo de lectura, un museo…) no son textos: van aparte.
+  const pendientes = enOrden.filter(({ l }) => l.tipo !== "actividad");
+  const paraHacer = enOrden.filter(({ l }) => l.tipo === "actividad");
   pintar(html`
     <header class="encabezado-vista">
       <p class="sobretitulo">${pendientes.length} lecturas en la cola</p>
@@ -909,6 +912,18 @@ async function vistaParaLeer() {
     </label>
     <h2 id="titulo-lista">Las próximas 10</h2>
     <ul class="lista-lecturas" id="lista"></ul>
+    ${paraHacer.length ? html`<section class="para-hacer">
+      <h2>Para hacer <span class="cuenta">${paraHacer.length}</span></h2>
+      <p class="nota">Lo de tu hoja de Recomendaciones que no es para leer, sino para hacer.</p>
+      <ul class="lista-lecturas" id="para-hacer">${paraHacer.map(({ l }) => html`<li class="lectura">
+        <span class="articulo-titulo">${l.titulo}</span>
+        <span class="insignias"><span class="insignia">${l.momento_final}</span>${(l.etiquetas || []).map((t) => html`<span class="insignia">${t}</span>`)}</span>
+        ${l.por_que ? html`<p>${l.por_que}</p>` : ""}
+        <div class="acciones-lectura">
+          <button class="boton-secundario" type="button" data-leida="${l.id}" aria-pressed="false">Lo hice</button>
+        </div>
+      </li>`)}</ul>
+    </section>` : ""}
   `);
   const lista = document.getElementById("lista");
   const titulo = document.getElementById("titulo-lista");
@@ -937,17 +952,20 @@ async function vistaParaLeer() {
     boton.textContent = guardada ? "✓ En Para leer" : "Guardar en Para leer";
     avisar(guardada ? "Vuelve a Para leer" : "Quitada de Para leer");
   });
-  // "Lo leí" deja la lectura en su sitio hasta la próxima visita, para poder deshacerlo.
-  lista.addEventListener("click", (evento) => {
+  // "Lo leí" (o "Lo hice") deja la lectura en su sitio hasta la próxima visita, para poder deshacerlo.
+  const alMarcarLeida = (evento) => {
     const boton = evento.target.closest("[data-leida]");
     if (!boton) return;
-    const p = pendientes.find(({ l }) => l.id === boton.dataset.leida);
+    const p = enOrden.find(({ l }) => l.id === boton.dataset.leida);
+    const actividad = p.l.tipo === "actividad";
     p.leida = !p.leida;
     marcar({ tipo: "leido", lectura: p.l.id, ...(p.guardada?.archivo ? { archivo: p.guardada.archivo } : {}), valor: p.leida });
     boton.setAttribute("aria-pressed", String(p.leida));
-    boton.textContent = p.leida ? "✓ Leída" : "Lo leí";
-    avisar(p.leida ? "Marcada como leída: sale de la cola" : "Vuelve a la cola");
-  });
+    boton.textContent = p.leida ? (actividad ? "✓ Hecho" : "✓ Leída") : (actividad ? "Lo hice" : "Lo leí");
+    avisar(p.leida ? (actividad ? "Marcada como hecha" : "Marcada como leída: sale de la cola") : "Vuelve a la lista");
+  };
+  lista.addEventListener("click", alMarcarLeida);
+  document.getElementById("para-hacer")?.addEventListener("click", alMarcarLeida);
   dibujar();
 }
 

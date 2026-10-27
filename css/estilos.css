@@ -971,3 +971,4 @@ details.preguntar[open] > summary, details.seguir[open] > summary { margin-botto
   cursor: pointer;
 }
 .boton-palabra[hidden] { display: none; }
+.para-hacer { margin-top: 2.5rem; }
