@@ -684,3 +684,38 @@ details ol { margin: 0.75rem 0; padding-left: 1.3em; }
 .pasos li { margin-bottom: 0.5rem; }
 .formulario { display: grid; gap: 0.9rem; margin-top: 1rem; }
 .formulario label { display: grid; gap: 0.3rem; font-weight: 600; font-size: 0.9rem; }
+
+/* ---------- Formato nuevo (en prueba): historias, páginas y grafo ---------- */
+
+.segmentos.cuatro { grid-template-columns: repeat(4, 1fr); }
+.filtros { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0 1rem; }
+a.chip { display: inline-block; text-decoration: none; }
+.enlace-sobrio { color: inherit; text-decoration: none; }
+.enlace-sobrio:hover { color: var(--acento); }
+.aviso-nuevo { display: inline-block; margin-top: 0.5rem; font-family: var(--sans); font-size: 0.9rem; font-weight: 600; color: var(--acento); text-decoration: none; }
+
+.lista-paginas { list-style: none; margin: 0 0 1.5rem; padding: 0; border: 1px solid var(--borde); border-radius: 14px; background: var(--superficie); overflow: hidden; }
+.fila-pagina { display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; min-height: 44px; padding: 0.75rem 1rem; border-top: 1px solid var(--borde); color: var(--texto); text-decoration: none; }
+.lista-paginas li:first-child .fila-pagina { border-top: 0; }
+.fila-pagina > span:first-child { display: flex; flex-direction: column; gap: 0.15rem; }
+.novedades { font-family: var(--sans); font-size: 0.85rem; font-weight: 600; color: var(--acento); white-space: nowrap; }
+
+.historia { margin-bottom: 0.9rem; }
+.historia h3 { font-family: var(--serif); font-size: 1.15rem; line-height: 1.3; margin: 0.4rem 0 0.5rem; }
+.historia-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: 0; }
+.historia-meta .insignia { margin-left: 0; }
+.insignia-nueva { background: var(--acento); border-color: transparent; color: var(--acento-texto); }
+.insignia-actualizada { background: var(--acento-suave); border-color: transparent; color: var(--acento); }
+.ya-sabias { color: var(--texto-suave); font-size: 0.95rem; }
+.nuevo-desde { border-top: 1px solid var(--borde); padding-top: 0.5rem; margin: 0.5rem 0; }
+.nuevo-desde ul { margin: 0.25rem 0 0; padding-left: 1.1rem; }
+.nuevo-desde li { margin: 0.3rem 0; font-family: var(--serif); line-height: 1.45; }
+.nuevo-desde .grupo { color: var(--acento); margin: 0; }
+.nuevo-desde.destacado { background: var(--acento-suave); border: 0; border-radius: 12px; padding: 0.8rem 1rem; }
+.lectura-claude { color: var(--texto-suave); }
+
+.historia-completa section { margin: 1.5rem 0; }
+.historia-completa h1 { margin-bottom: 0.3rem; }
+.linea-tiempo, .que-sigue { margin: 0; padding-left: 1.1rem; }
+.linea-tiempo li, .que-sigue li { margin: 0.4rem 0; line-height: 1.45; }
+.lista-compacta a .insignia { align-self: flex-start; margin: 0 0 0.25rem; }
