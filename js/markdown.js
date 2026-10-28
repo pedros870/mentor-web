@@ -27,10 +27,20 @@ export function separarFicha(texto) {
   return { ficha, cuerpo: texto };
 }
 
-const ENLACE = /\[([^\]]+)\]\(((?:[^()\s]|\([^()\s]*\))+)(?:\s+&quot;.*?&quot;)?\)/g;
+// La dirección puede ir entre ángulos: [texto](<https://…>).
+const ENLACE = /\[([^\]]+)\]\((?:&lt;(\S+?)&gt;|((?:[^()\s]|\([^()\s]*\))+))(?:\s+&quot;.*?&quot;)?\)/g;
 const ES_URL_SEGURA = /^(https?:|mailto:|#\/)/i;
+// Las pocas etiquetas de HTML que los artículos traen dentro del texto (notas al
+// pie, fórmulas, subrayados). Solo valen en pareja y sin atributos, y lo de
+// adentro ya va escapado.
+const ETIQUETA = /&lt;(sup|sub|u|b|i|em|strong|s)&gt;(.*?)&lt;\/\1&gt;/g;
 
 function enfasis(texto) {
+  let antes;
+  do {
+    antes = texto;
+    texto = texto.replace(ETIQUETA, "<$1>$2</$1>");
+  } while (texto !== antes);
   return texto
     .replace(/\*\*(?=\S)(.+?)\*\*/g, "<strong>$1</strong>")
     .replace(/__(?=\S)(.+?)__/g, "<strong>$1</strong>")
@@ -47,12 +57,15 @@ export function enLinea(crudo) {
     .replace(/`([^`]+)`/g, (_, c) => guardar(`<code>${escapar(c)}</code>`));
   // Los enlaces "#/…" llevan a otra vista de Mentor (por ejemplo, al lector) y
   // se abren en la misma pestaña; los demás salen a otro sitio.
-  texto = escapar(texto).replace(ENLACE, (_, etiqueta, url) => {
+  texto = escapar(texto).replace(ENLACE, (_, etiqueta, entreAngulos, suelta) => {
+    const url = entreAngulos || suelta;
     if (!ES_URL_SEGURA.test(url)) return etiqueta;
     const externo = url.startsWith("#/") ? "" : ' target="_blank" rel="noopener noreferrer"';
     return guardar(`<a href="${url}"${externo}>${enfasis(etiqueta)}</a>`);
   });
-  return enfasis(texto).replace(/\u0000(\d+)\u0000/g, (_, i) => piezas[Number(i)]);
+  // Un enlace guardado puede llevar adentro otras piezas guardadas, como un "\[".
+  const devolver = (t) => t.replace(/\u0000(\d+)\u0000/g, (_, i) => devolver(piezas[Number(i)]));
+  return devolver(enfasis(texto));
 }
 
 const TITULO = /^(#{1,6})\s+(.*?)\s*#*\s*$/;
