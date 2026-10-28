@@ -885,7 +885,8 @@ async function vistaParaLeer() {
       || (a.horas_estimadas ?? 99) - (b.horas_estimadas ?? 99))
     .map(conDestino);
   // Las actividades de la hoja Recomendaciones (un grupo de lectura, un museo…) no son textos: van aparte.
-  const pendientes = enOrden.filter(({ l }) => l.tipo !== "actividad");
+  // Los cursos, las conferencias y los documentales están en Para ver.
+  const pendientes = enOrden.filter(({ l }) => l.tipo !== "actividad" && !CLASES_PARA_VER.has(l.tipo));
   const paraHacer = enOrden.filter(({ l }) => l.tipo === "actividad");
   pintar(html`
     <header class="encabezado-vista">
@@ -905,7 +906,8 @@ async function vistaParaLeer() {
       </li>`)}</ul>
     </section>` : ""}
     <p class="nota">Orden provisional: primero lo que marcaste para este trimestre y, dentro de cada momento, lo más corto.
-      La prioridad con los cuatro criterios llega con la cola durable.</p>
+      La prioridad con los cuatro criterios llega con la cola durable. Los cursos grabados, las conferencias y los
+      documentales están en <a href="#/para-ver/cursos">Para ver</a>.</p>
     <label class="buscador">
       <span class="oculto">Buscar en la biblioteca</span>
       <input id="buscar" type="search" placeholder="Buscar por título, autor o tema" autocomplete="off">
@@ -967,6 +969,195 @@ async function vistaParaLeer() {
   lista.addEventListener("click", alMarcarLeida);
   document.getElementById("para-hacer")?.addEventListener("click", alMarcarLeida);
   dibujar();
+}
+
+// ---------- Para ver: videos, cursos, conferencias y documentales ----------
+// Lo propone Claude o lo agrega Pedro. Lo que Pedro pega llega al Cuaderno (clase "ver") y se ve
+// aquí de una vez; Claude Code lo pasa a catalogo/para_ver.json con /cuaderno. Lo visto se marca
+// como leído, igual que en Para leer, y se consolida cada noche en datos/biblioteca/estado.json.
+// Los videos se ven con el reproductor de YouTube, que solo se carga al abrir cada uno.
+
+const SUBPESTANAS_VER = [
+  { slug: "videos", nombre: "Videos", clases: ["video"], invitacion: "Pega el enlace de un video de YouTube" },
+  { slug: "cursos", nombre: "Cursos", clases: ["curso"], invitacion: "Pega el enlace de un curso" },
+  { slug: "documentales", nombre: "Documentales y conferencias", clases: ["documental", "conferencia"],
+    invitacion: "Pega el enlace de un documental o de una conferencia" },
+];
+const CLASES_PARA_VER = new Set(["curso", "documental", "conferencia"]);
+const ACCION_VER = { video: "Ver en YouTube", curso: "Ir al curso", conferencia: "Ir a las conferencias", documental: "Dónde verlo" };
+const TERMINAR_VER = { video: "Lo vi", curso: "Lo terminé", conferencia: "Las vi", documental: "Lo vi" };
+const NIVELES_CANAL = { "Divulgacion alta": "Divulgación alta", Divulgacion: "Divulgación", Tecnico: "Técnico",
+  Academico: "Académico", Oficio: "Oficio", "Académico": "Académico" };
+const ID_YOUTUBE = /^[\w-]{6,64}$/;
+
+// El video o la lista de un enlace de YouTube, para verlo aquí mismo.
+function deYoutube(enlace) {
+  try {
+    const u = new URL(enlace);
+    const sitio = u.hostname.replace(/^(www|m)\./, "");
+    const [, tipo, id] = u.pathname.split("/");
+    const video = sitio === "youtu.be" ? tipo
+      : ["youtube.com", "youtube-nocookie.com"].includes(sitio)
+        ? u.searchParams.get("v") || (["shorts", "embed", "live"].includes(tipo) ? id : null) : null;
+    const lista = ["youtube.com", "youtube-nocookie.com"].includes(sitio) ? u.searchParams.get("list") : null;
+    return { youtube: ID_YOUTUBE.test(video || "") ? video : null, youtube_lista: ID_YOUTUBE.test(lista || "") ? lista : null };
+  } catch {
+    return { youtube: null, youtube_lista: null };
+  }
+}
+
+function sitioDe(enlace) {
+  try {
+    return new URL(enlace).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+}
+
+// El título y el canal de un video que Pedro acaba de pegar, mientras Claude completa la ficha.
+async function datosDeYoutube(enlace) {
+  try {
+    const r = await fetch(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(enlace)}`);
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
+  }
+}
+
+function duracionVer(item) {
+  if (item.minutos) return item.minutos >= 90 ? `${String(Math.round(item.minutos / 6) / 10).replace(".", ",")} h` : `${item.minutos} min`;
+  return item.horas_estimadas ? `${item.horas_estimadas} h` : "";
+}
+
+function itemParaVer(item, visto) {
+  // "BBC · BBC Radio 4" o "Shoah · Claude Lanzmann (1985)": el autor ya está en la plataforma.
+  const repetido = item.autor && item.plataforma && sinTildes(item.plataforma).includes(sinTildes(item.autor));
+  const meta = [repetido ? "" : item.autor, item.plataforma, duracionVer(item)].filter(Boolean).join(" · ");
+  const busqueda = /google\.com\/search/.test(item.url || "");
+  return html`<li><details class="noticia${visto ? " apagada" : ""}" data-youtube="${item.youtube || ""}" data-lista="${item.youtube_lista || ""}">
+    <summary>
+      <span class="noticia-titulo">${item.titulo}</span>
+      <span class="noticia-meta">${visto ? html`<span class="insignia insignia-vista">Ya ${item.clase === "conferencia" ? "las" : "lo"} viste</span>` : ""}${
+        item.pendiente ? html`<span class="insignia insignia-actualizada">Lo agregaste</span>` : ""}${meta}</span>
+    </summary>
+    <div class="noticia-cuerpo">
+      ${item.youtube || item.youtube_lista ? html`<div class="video-marco"></div>` : ""}
+      ${item.por_que ? html`<p class="por-que">${item.por_que}</p>` : ""}
+      ${item.pendiente ? html`<p class="pendiente">Claude le hace la ficha en la próxima sesión de Claude Code (/cuaderno).</p>` : ""}
+      <div class="acciones-lectura">
+        ${item.url ? html`<a class="boton-secundario" href="${item.url}" target="_blank" rel="noopener noreferrer">${busqueda ? "Buscar en la web" : ACCION_VER[item.clase]} ↗</a>` : ""}
+        <button class="boton-secundario" type="button" data-visto="${item.id}" data-clase="${item.clase}" aria-pressed="${String(visto)}">${visto ? "✓ Visto" : TERMINAR_VER[item.clase]}</button>
+      </div>
+    </div>
+  </details></li>`;
+}
+
+// Al abrir un video se carga el reproductor; al cerrarlo se quita, para que no siga sonando.
+function alAbrirVideo(evento) {
+  const detalles = evento.target;
+  const marco = detalles.querySelector?.(":scope > .noticia-cuerpo > .video-marco");
+  if (!marco) return;
+  if (!detalles.open) {
+    marco.replaceChildren();
+    return;
+  }
+  if (marco.firstChild) return;
+  const { youtube, lista } = detalles.dataset;
+  const iframe = document.createElement("iframe");
+  iframe.src = ID_YOUTUBE.test(youtube) ? `https://www.youtube-nocookie.com/embed/${youtube}${ID_YOUTUBE.test(lista) ? `?list=${lista}` : ""}`
+    : `https://www.youtube-nocookie.com/embed/videoseries?list=${lista}`;
+  iframe.title = detalles.querySelector(".noticia-titulo").textContent;
+  iframe.allow = "accelerometer; encrypted-media; gyroscope; picture-in-picture; web-share";
+  iframe.allowFullscreen = true;
+  // La página no manda referer a nadie; el reproductor de YouTube lo necesita para funcionar.
+  iframe.referrerPolicy = "strict-origin-when-cross-origin";
+  marco.append(iframe);
+}
+
+async function vistaParaVer(ruta) {
+  const sub = SUBPESTANAS_VER.find((s) => s.slug === ruta) || SUBPESTANAS_VER[0];
+  const [{ items, grupos_de_canales: grupos }, entradas, consolidado, lectura, fuentes] = await Promise.all([
+    leerJSON("catalogo/para_ver.json"),
+    leerCuaderno().catch(() => []),
+    leerJSON("datos/biblioteca/estado.json").catch(() => ({})),
+    estadoDeLectura(),
+    sub.slug === "videos" ? leerJSON("catalogo/fuentes.json") : null,
+  ]);
+  const visto = (id) => {
+    const clave = `lectura:${id}`;
+    return lectura.marcadas.has(clave) ? lectura.leidos.has(clave) : Boolean(consolidado[id]?.leida);
+  };
+  // Lo que Pedro agregó y Claude todavía no pasó al catálogo.
+  const enCatalogo = new Set(items.flatMap((i) => [i.id, i.entrada]));
+  const agregados = await Promise.all(entradas
+    .filter((e) => e.clase === "ver" && !e.archivada && !enCatalogo.has(e.id))
+    .reverse()
+    .map(async (e) => {
+      const para = SUBPESTANAS_VER.find((s) => s.slug === e.para) || SUBPESTANAS_VER[0];
+      const yt = deYoutube(e.enlace);
+      const datos = yt.youtube || yt.youtube_lista ? await datosDeYoutube(e.enlace) : null;
+      return { id: e.id, clase: para.clases[0], titulo: datos?.title || e.enlace, autor: datos?.author_name,
+        plataforma: yt.youtube || yt.youtube_lista ? "YouTube" : sitioDe(e.enlace),
+        url: e.enlace, ...yt, por_que: e.texto !== e.enlace ? e.texto : "", pendiente: true };
+    }));
+  const todos = [...agregados, ...items];
+  const deLa = (s) => todos.filter((i) => s.clases.includes(i.clase));
+  const lista = deLa(sub);
+  const ordenada = [...lista.filter((i) => !visto(i.id)), ...lista.filter((i) => visto(i.id))];
+  const canales = fuentes ? fuentes.fuentes.filter((f) => f.hoja_origen === "Canales" && f.canal_final !== "Fuera") : [];
+  const grupoDe = new Map(Object.entries(grupos).flatMap(([g, etiquetas]) => etiquetas.map((e) => [e, g])));
+  const deCadaGrupo = agrupar(canales, (f) => grupoDe.get(f.etiquetas[0]) || "Otros");
+  const porGrupo = [...Object.keys(grupos), "Otros"].filter((g) => deCadaGrupo.has(g)).map((g) => [g, deCadaGrupo.get(g)]);
+
+  pintar(html`
+    <div class="encabezado-pestanas">
+      <p class="sobretitulo">Videos, cursos y documentales</p>
+      <nav class="pestanas" aria-label="Para ver">${SUBPESTANAS_VER.map((s) => html`<a href="#/para-ver/${s.slug}"
+        aria-current="${s === sub ? "page" : "false"}">${s.nombre}<span class="cuenta">${deLa(s).filter((i) => !visto(i.id)).length}</span></a>`)}</nav>
+    </div>
+    <header class="encabezado-vista">
+      <h1>${sub.nombre}</h1>
+    </header>
+    <form class="form-para-ver tarjeta">
+      <input name="enlace" type="url" required placeholder="${sub.invitacion}" aria-label="${sub.invitacion}">
+      <input name="nota" type="text" placeholder="Una nota (opcional)" aria-label="Una nota, por ejemplo por qué lo quieres ver">
+      <button class="boton" type="submit">Agregar</button>
+    </form>
+    ${ordenada.length ? html`<ol class="relevante para-ver" id="para-ver">${ordenada.map((i) => itemParaVer(i, visto(i.id)))}</ol>`
+      : html`<p class="nota">Todavía no hay nada aquí. Pega un enlace arriba y Claude le hace la ficha.</p>`}
+    ${canales.length ? html`<section class="canales">
+      <h2>Tus canales <span class="cuenta">${canales.length}</span></h2>
+      <p class="nota">Los canales de tu catálogo que dejaste para consultar. YouTube no deja que un programa lea los videos
+        nuevos de un canal, así que por ahora cada uno abre su búsqueda en YouTube.</p>
+      ${porGrupo.map(([grupo, lista]) => html`<details class="mas">
+        <summary>${grupo} (${lista.length})</summary>
+        <ul class="lista-compacta">${lista.map((f) => html`<li><a href="${f.url}" target="_blank" rel="noopener noreferrer">
+          <span class="articulo-titulo">${f.nombre}</span><span class="meta">${NIVELES_CANAL[f.etiquetas[1]] || f.etiquetas[1] || ""}</span></a></li>`)}</ul>
+      </details>`)}
+    </section>` : ""}
+  `);
+
+  document.getElementById("para-ver")?.addEventListener("toggle", alAbrirVideo, true);
+  // "Lo vi" deja el video en su sitio hasta la próxima visita, para poder deshacerlo.
+  document.getElementById("para-ver")?.addEventListener("click", (evento) => {
+    const boton = evento.target.closest("[data-visto]");
+    if (!boton) return;
+    const ahora = boton.getAttribute("aria-pressed") !== "true";
+    marcar({ tipo: "leido", lectura: boton.dataset.visto, valor: ahora });
+    boton.setAttribute("aria-pressed", String(ahora));
+    boton.textContent = ahora ? "✓ Visto" : TERMINAR_VER[boton.dataset.clase];
+    avisar(ahora ? "Marcado como visto" : "Vuelve a la lista");
+  });
+  contenido.querySelector(".form-para-ver").addEventListener("submit", (evento) => {
+    evento.preventDefault();
+    const form = evento.target;
+    const enlace = form.enlace.value.trim();
+    const nota = form.nota.value.trim();
+    if (!enlace) return;
+    marcar({ tipo: "cuaderno", clase: "ver", texto: nota || enlace, enlace, para: sub.slug });
+    avisar("Quedó en Para ver");
+    vistaParaVer(sub.slug);
+  });
 }
 
 // ---------- Radar ----------
@@ -1074,6 +1265,8 @@ function hilo(entradas, { conContexto = true, desde } = {}) {
     ${conContexto ? contextoDeHilo(raiz) : ""}
     ${entradas.map((e) => html`<div class="turno turno-pedro">
         ${e.clase === "palabra" ? html`<p><strong>${e.texto}</strong>${e.oracion ? html` <span class="oracion">«${e.oracion}»</span>` : ""}</p>`
+          : e.clase === "ver" ? html`<p><a href="#/para-ver/${e.para || "videos"}">Para ver</a>: ${e.texto}${e.texto !== e.enlace
+            ? html` · <a href="${e.enlace}" target="_blank" rel="noopener noreferrer">${sitioDe(e.enlace)} ↗</a>` : ""}</p>`
           : html`<p>${e.texto}</p>`}
         <span class="meta">${fechaLarga(e.ts, true)}</span>
       </div>
@@ -1455,13 +1648,13 @@ async function vistaPestanas(clave, ruta) {
     <div class="dos-columnas">
       <div class="principal">
         <header class="encabezado-vista">
-          <h1>Lo relevante en ${hoja ? paginas[hoja].nombre : pestana.nombre}</h1>
+          <h1>Lo relevante en ${hoja ? paginas[hoja].filtro || paginas[hoja].nombre : pestana.nombre}</h1>
           ${deOtroDia ? html`<p class="meta">Escrito el ${fechaLarga(pestana.fecha_relevante)}</p>` : ""}
         </header>
         ${varias ? html`<div class="filtros-pestana">
           <a class="chip" href="${base}" aria-current="${hoja ? "false" : "page"}">Todo</a>
           ${pestana.hojas.map((pid) => html`<a class="chip${paginas[pid].hoy ? "" : " sin-hoy"}" href="${base}/${pid}"
-            aria-current="${pid === hoja ? "page" : "false"}">${paginas[pid].nombre}${paginas[pid].hoy ? html`<span>${paginas[pid].hoy}</span>` : ""}</a>`)}
+            aria-current="${pid === hoja ? "page" : "false"}">${paginas[pid].filtro || paginas[pid].nombre}${paginas[pid].hoy ? html`<span>${paginas[pid].hoy}</span>` : ""}</a>`)}
         </div>` : ""}
         ${relevante.length ? html`<ol class="relevante">${relevante.map((r) => html`<li>${noticia(r.h, visto(r.h),
           { titulo: r.texto, pagina: pagina(r.h), marca: marca(r.h) })}</li>`)}</ol>`
@@ -1707,6 +1900,7 @@ const VISTAS = {
   fuentes: vistaFuentes,
   clasificacion: () => vistaFuentes("articulos"),
   "para-leer": vistaParaLeer,
+  "para-ver": vistaParaVer,
   radar: vistaRadar,
   cuaderno: vistaCuaderno,
   vocabulario: vistaCuaderno,

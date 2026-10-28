@@ -972,3 +972,28 @@ details.preguntar[open] > summary, details.seguir[open] > summary { margin-botto
 }
 .boton-palabra[hidden] { display: none; }
 .para-hacer { margin-top: 2.5rem; }
+
+/* ---------- Para ver: videos, cursos, conferencias y documentales ---------- */
+
+.form-para-ver { display: grid; gap: 0.6rem; margin: 0 0 1.5rem; }
+.form-para-ver input {
+  width: 100%;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--borde);
+  border-radius: 10px;
+  background: var(--fondo);
+  color: var(--texto);
+  font: inherit;
+  font-size: 0.98rem;
+}
+.form-para-ver .boton { justify-self: start; }
+@media (min-width: 700px) {
+  .form-para-ver { grid-template-columns: minmax(0, 3fr) minmax(0, 2fr) auto; align-items: center; }
+}
+
+/* El reproductor de YouTube, a lo ancho de la noticia, solo cuando se abre. */
+.video-marco { aspect-ratio: 16 / 9; margin: 0 0 0.9rem; border-radius: 10px; overflow: hidden; background: #000; }
+.video-marco iframe { display: block; width: 100%; height: 100%; border: 0; }
+.para-ver .por-que { font-family: var(--serif); font-size: 1.05rem; line-height: 1.6; margin: 0 0 0.75rem; }
+.canales { margin-top: 2.5rem; }
+.canales details.mas { margin-top: 0.4rem; }
