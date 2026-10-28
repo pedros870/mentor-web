@@ -461,6 +461,8 @@ async function vistaHoy(categoria) {
 // ---------- Dónde quedó Pedro en una lectura larga ----------
 
 const CLAVE_AVANCE = "mentor-avance"; // en este navegador, para retomar al instante
+const CLAVE_IR_A = "mentor-ir-a"; // el párrafo de una frase guardada, para abrir el lector ahí
+const VOLVER_SOLO = 30 * 60000; // si saliste hace menos de media hora, vuelves solo a donde ibas
 const MINIMO_DE_BLOQUES = 12; // con menos párrafos no es una lectura larga
 const GUARDAR_AVANCE_CADA = 180000;
 
@@ -490,12 +492,28 @@ const porcentaje = (a) => Math.min(99, Math.round((100 * (a.parrafo + 1)) / (a.t
 // (o cada tres minutos), una marca con el párrafo que tenía a la vista.
 function seguirAvance(ruta, avance, leido) {
   const bloques = [...contenido.querySelectorAll(".lector .cuerpo > *")];
+  const ir = (i) => {
+    if (!bloques[i]) return;
+    bloques[i].classList.add("aqui-quedaste");
+    bloques[i].scrollIntoView({ block: "start" });
+  };
+  let irA = null;
+  try {
+    irA = JSON.parse(localStorage.getItem(CLAVE_IR_A) || "null");
+    localStorage.removeItem(CLAVE_IR_A);
+  } catch { /* sin almacenamiento */ }
+  const deUnaFrase = irA?.archivo === ruta && Date.now() - irA.ts < 600000;
+  if (deUnaFrase) ir(irA.parrafo);
   if (bloques.length < MINIMO_DE_BLOQUES) return;
   const barra = document.createElement("div");
   barra.className = "avance-barra";
   barra.innerHTML = "<span></span>";
   contenido.querySelector(".lector").prepend(barra);
-  if (avance && !leido && avance.parrafo >= 2 && avance.parrafo < bloques.length - 2) {
+  const enCurso = avance && !leido && avance.parrafo >= 2 && avance.parrafo < bloques.length - 2;
+  if (enCurso && !deUnaFrase && Date.now() - Date.parse(avance.fecha) < VOLVER_SOLO) {
+    ir(avance.parrafo); // saliste un momento (al Cuaderno, a otra pestaña): vuelves solo
+    avisar("Volviste a donde ibas");
+  } else if (enCurso && !deUnaFrase) {
     const aviso = document.createElement("p");
     aviso.className = "retomar";
     aviso.innerHTML = `<button class="boton" type="button">Seguir donde quedaste</button>
@@ -1374,12 +1392,16 @@ async function vistaRadar() {
 // API, y las respuestas quedan en datos/cuaderno/respuestas.jsonl. Como las marcas se leen
 // de los últimos días, cada noche se copia todo lo del cuaderno a datos/cuaderno/entradas.json.
 
-const CLASES_CUADERNO = { pregunta: "Pregunta", palabra: "Palabra", pedido: "Pedido para Mentor" };
+const CLASES_CUADERNO = { pregunta: "Pregunta", palabra: "Palabra", frase: "Frase", pedido: "Pedido para Mentor" };
+// Lo que es solo de Pedro (sus frases y lo que piensa de ellas): Claude no lo responde.
+const PROPIAS_DE_PEDRO = new Set(["frase", "reflexion"]);
 const ESTADOS_RESPUESTA = { hecho: "Hecho", en_curso: "En curso", descartado: "Descartado" };
 const INVITACIONES = {
   pregunta: "Tu pregunta para Claude…",
   palabra: "La palabra o la frase…",
   pedido: "Qué quieres que cambie o se agregue en Mentor…",
+  frase: "La frase que quieres guardar, de un libro o de donde sea…",
+  reflexion: "Lo que te deja esta frase, o en qué te hace pensar…",
 };
 const PREGUNTAS_RAPIDAS = ["¿Qué implicaciones tiene?", "¿Qué significa para Colombia?", "¿Qué contexto me falta?",
   "¿Qué puede pasar ahora?"];
@@ -1411,7 +1433,7 @@ function hilosDe(entradas) {
   return [...agrupar(entradas, (e) => raiz(e).id).values()];
 }
 
-const pendienteHilo = (hilo) => !hilo.at(-1).respuestas.length;
+const pendienteHilo = (hilo) => !PROPIAS_DE_PEDRO.has(hilo.at(-1).clase) && !hilo.at(-1).respuestas.length;
 
 // Las preguntas que ya se hicieron sobre cada historia, para mostrarlas al abrirla.
 let hilosPorHistoria = new Map();
@@ -1428,7 +1450,7 @@ function formularioCuaderno({ clase = "pregunta", historia = "", archivo = "", t
     ${rapidas ? html`<div class="rapidas">${PREGUNTAS_RAPIDAS.map((p) => html`<button type="button" class="chip" data-rapida="${p}">${p}</button>`)}</div>` : ""}
     <textarea name="texto" rows="2" required placeholder="${INVITACIONES[clase]}"></textarea>
     ${conClase ? html`<input name="oracion" type="text" placeholder="La oración donde la viste (opcional)" hidden>` : ""}
-    <button class="boton" type="submit">Dejar en el Cuaderno</button>
+    <button class="boton" type="submit">${PROPIAS_DE_PEDRO.has(clase) ? "Guardar" : "Dejar en el Cuaderno"}</button>
   </form>`;
 }
 
@@ -1444,6 +1466,8 @@ function hilo(entradas, { conContexto = true, desde } = {}) {
     ${conContexto ? contextoDeHilo(raiz) : ""}
     ${entradas.map((e) => html`<div class="turno turno-pedro">
         ${e.clase === "palabra" ? html`<p><strong>${e.texto}</strong>${e.oracion ? html` <span class="oracion">«${e.oracion}»</span>` : ""}</p>`
+          : e.clase === "error" ? html`<p>Error en el texto: <strong>«${e.texto}»</strong>${e.oracion && e.oracion !== e.texto
+            ? html` <span class="oracion">en «${e.oracion}»</span>` : ""}</p>`
           : e.clase === "ver" ? html`<p><a href="#/para-ver/${e.para || "videos"}">Para ver</a>: ${e.texto}${e.texto !== e.enlace
             ? html` · <a href="${e.enlace}" target="_blank" rel="noopener noreferrer">${sitioDe(e.enlace)} ↗</a>` : ""}</p>`
           : html`<p>${e.texto}</p>`}
@@ -1470,10 +1494,27 @@ function preguntarSobre(h) {
       ${formularioCuaderno({ historia: h.id, titulo: h.titulo, rapidas: true })}</details>`;
 }
 
+// Una frase guardada: el texto, de dónde salió (lleva al párrafo en el lector) y lo que Pedro pensó de ella.
+function itemFrase([frase, ...siguientes]) {
+  const reflexiones = siguientes.filter((e) => e.clase === "reflexion");
+  return html`<article class="frase${frase.archivada ? " archivado" : ""}">
+    <blockquote>${frase.texto}</blockquote>
+    <p class="meta">${frase.archivo ? html`<a href="${enlaceLector(frase)}" data-ir-a="${frase.archivo}" data-parrafo="${frase.parrafo ?? ""}">${frase.titulo || "La lectura"}</a> · ` : ""}${fechaLarga(frase.ts, true)}</p>
+    ${reflexiones.map((r) => html`<p class="reflexion">${r.texto}</p>`)}
+    <div class="acciones-hilo">
+      <details class="seguir"><summary>${reflexiones.length ? "Agregar otra reflexión" : "Agregar una reflexión"}</summary>
+        ${formularioCuaderno({ clase: "reflexion", sigue: frase.id })}</details>
+      <button class="boton-texto" type="button" data-archivar="${frase.id}" data-valor="${String(!frase.archivada)}">${frase.archivada ? "Sacar del archivo" : "Archivar"}</button>
+    </div>
+  </article>`;
+}
+
 async function vistaCuaderno() {
   const [entradas, { visitas }] = await Promise.all([leerCuaderno(), marcasV2()]);
   const desde = visitas.get("cuaderno");
-  const hilos = hilosDe(entradas).sort((a, b) => b.at(-1).ts.localeCompare(a.at(-1).ts));
+  const todos = hilosDe(entradas).sort((a, b) => b.at(-1).ts.localeCompare(a.at(-1).ts));
+  const frases = todos.filter((x) => x[0].clase === "frase" && !x[0].archivada);
+  const hilos = todos.filter((x) => x[0].clase !== "frase" || x[0].archivada);
   const activos = hilos.filter((x) => !x[0].archivada);
   const pendientes = activos.filter(pendienteHilo);
   const respondidos = (clase) => activos.filter((x) => x[0].clase === clase && !pendienteHilo(x));
@@ -1491,8 +1532,14 @@ async function vistaCuaderno() {
     </header>
     <section class="tarjeta">${formularioCuaderno({ conClase: true })}</section>
     ${pendientes.length ? seccion("Por responder", pendientes, "") : ""}
+    <section class="seccion-cuaderno frases">
+      <h2>Frases <span class="cuenta">${frases.length}</span></h2>
+      ${frases.length ? frases.map(itemFrase)
+        : html`<p class="nota">En el lector, selecciona una frase y toca "Guardar frase". Aquí queda con su lectura y lo que pienses de ella.</p>`}
+    </section>
     ${seccion("Preguntas", respondidos("pregunta"), "Las preguntas que le hagas a Claude sobre una noticia aparecen aquí con su respuesta.")}
-    ${seccion("Vocabulario", respondidos("palabra"), "En el lector, selecciona una palabra o una frase y toca \"Guardar en vocabulario\". El repaso diario llega cuando haya palabras.")}
+    ${seccion("Vocabulario", respondidos("palabra"), "En el lector, selecciona una palabra y toca \"Vocabulario\". El repaso diario llega cuando haya palabras.")}
+    ${respondidos("error").length ? seccion("Errores en los textos", respondidos("error"), "") : ""}
     ${seccion("Pedidos para Mentor", respondidos("pedido"), "Lo que quieras cambiar o agregar en Mentor.")}
     ${archivados.length ? html`<details class="mas"><summary>Archivado (${archivados.length})</summary>
       ${archivados.map((x) => hilo(x))}</details>` : ""}
@@ -1521,6 +1568,12 @@ contenido.addEventListener("click", (evento) => {
   const rapida = evento.target.closest("[data-rapida]");
   const clase = evento.target.closest("[data-clase-cuaderno]");
   const archivar = evento.target.closest("[data-archivar]");
+  const irA = evento.target.closest("[data-ir-a]");
+  if (irA?.dataset.parrafo) {
+    try {
+      localStorage.setItem(CLAVE_IR_A, JSON.stringify({ archivo: irA.dataset.irA, parrafo: Number(irA.dataset.parrafo), ts: Date.now() }));
+    } catch { /* sin almacenamiento: abre al comienzo */ }
+  }
   if (rapida) {
     const campo = rapida.closest("form").texto;
     campo.value = rapida.dataset.rapida;
@@ -1540,13 +1593,21 @@ contenido.addEventListener("click", (evento) => {
   }
 });
 
-// En el lector, al seleccionar una palabra o una frase aparece "Guardar en vocabulario".
-const botonPalabra = document.createElement("button");
-botonPalabra.type = "button";
-botonPalabra.className = "boton-palabra";
-botonPalabra.textContent = "Guardar en vocabulario";
-botonPalabra.hidden = true;
-document.body.append(botonPalabra);
+// En el lector, al seleccionar texto aparece un menú: guardar la palabra en el vocabulario,
+// guardar la frase o señalar un error del texto. Todo se guarda ahí mismo, sin salir de la lectura.
+const MAXIMO_DE_PALABRA = 80; // caracteres; más que eso ya no es una palabra ni una expresión
+const MAXIMO_DE_FRASE = 1500;
+const menuSeleccion = document.createElement("div");
+menuSeleccion.className = "menu-seleccion";
+menuSeleccion.hidden = true;
+for (const [clase, texto] of [["palabra", "Vocabulario"], ["frase", "Guardar frase"], ["error", "Error en el texto"]]) {
+  const boton = document.createElement("button");
+  boton.type = "button";
+  boton.dataset.guardarComo = clase;
+  boton.textContent = texto;
+  menuSeleccion.append(boton);
+}
+document.body.append(menuSeleccion);
 let seleccion = null;
 
 // La oración donde está lo seleccionado, para que Claude dé el significado en su contexto.
@@ -1565,31 +1626,182 @@ document.addEventListener("selectionchange", () => {
   const sel = document.getSelection();
   const texto = sel?.toString().replace(/\s+/g, " ").trim() || "";
   const cuerpo = contenido.querySelector(".lector > .cuerpo");
-  if (!cuerpo || !texto || texto.length > 80 || !sel.rangeCount || !cuerpo.contains(sel.anchorNode)) {
-    botonPalabra.hidden = true;
+  if (!cuerpo || !texto || texto.length > MAXIMO_DE_FRASE || !sel.rangeCount || !cuerpo.contains(sel.anchorNode)) {
+    menuSeleccion.hidden = true;
     return;
   }
   const rango = sel.getRangeAt(0);
   const caja = rango.getBoundingClientRect();
-  seleccion = { texto, oracion: oracionDe(rango, texto) };
-  botonPalabra.style.top = `${window.scrollY + caja.bottom + 10}px`;
-  botonPalabra.style.left = `${Math.max(8, Math.min(window.scrollX + caja.left, document.documentElement.clientWidth - 210))}px`;
-  botonPalabra.hidden = false;
+  const bloque = [...cuerpo.children].findIndex((b) => b.contains(sel.anchorNode));
+  seleccion = { texto, oracion: oracionDe(rango, texto), parrafo: bloque >= 0 ? bloque : undefined };
+  menuSeleccion.querySelector('[data-guardar-como="palabra"]').hidden = texto.length > MAXIMO_DE_PALABRA;
+  menuSeleccion.style.top = `${window.scrollY + caja.bottom + 10}px`;
+  menuSeleccion.style.left = `${Math.max(8, Math.min(window.scrollX + caja.left, document.documentElement.clientWidth - 330))}px`;
+  menuSeleccion.hidden = false;
 });
-botonPalabra.addEventListener("pointerdown", (evento) => evento.preventDefault()); // que no se pierda la selección
-botonPalabra.addEventListener("click", () => {
+menuSeleccion.addEventListener("pointerdown", (evento) => evento.preventDefault()); // que no se pierda la selección
+menuSeleccion.addEventListener("click", (evento) => {
+  const boton = evento.target.closest("[data-guardar-como]");
   const lector = contenido.querySelector(".lector");
-  if (!seleccion || !lector) return;
-  marcar({ tipo: "cuaderno", clase: "palabra", texto: seleccion.texto, oracion: seleccion.oracion,
-    archivo: lector.dataset.archivo, titulo: lector.dataset.titulo });
-  avisar(`"${seleccion.texto}" quedó en el Cuaderno`);
+  if (!boton || !seleccion || !lector) return;
+  const clase = boton.dataset.guardarComo;
+  const { archivo, titulo } = lector.dataset;
+  marcar({ tipo: "cuaderno", clase, texto: seleccion.texto, archivo, titulo,
+    ...(clase === "frase" ? { parrafo: seleccion.parrafo } : { oracion: seleccion.oracion }) });
+  avisar({ palabra: `"${seleccion.texto}" quedó en tu vocabulario`, frase: "La frase quedó en tu Cuaderno",
+    error: "Señalado: Claude lo corrige en tu copia con /cuaderno" }[clase]);
   document.getSelection().removeAllRanges();
-  botonPalabra.hidden = true;
+  menuSeleccion.hidden = true;
 });
 
 // ---------- Estado ----------
 
-async function vistaEstado() {
+const SUBPESTANAS_ESTADO = [{ slug: "", nombre: "El sistema" }, { slug: "gasto", nombre: "Gasto y piezas" }];
+
+function pestanasDeEstado(activa) {
+  return html`<div class="encabezado-pestanas">
+    <p class="sobretitulo">Cómo va el sistema</p>
+    <nav class="pestanas" aria-label="Estado">${SUBPESTANAS_ESTADO.map((s) => html`<a href="#/estado${s.slug ? `/${s.slug}` : ""}"
+      aria-current="${s.slug === activa ? "page" : "false"}">${s.nombre}</a>`)}</nav>
+  </div>`;
+}
+
+const usd = (n, decimales = 2) => n.toLocaleString("es-CO", { style: "currency", currency: "USD",
+  minimumFractionDigits: decimales, maximumFractionDigits: decimales });
+const MODELOS = { "claude-sonnet-5-5": "Sonnet", "claude-haiku-5-5": "Haiku" };
+const MESES_CORTOS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
+
+// Columnas de un solo color para los últimos días. La altura se pone después de pintar, porque
+// la política de seguridad de la página no deja estilos escritos en el HTML. El valor del último
+// día va escrito; los demás, al pasar el puntero o con el teclado, y en la tabla.
+function columnas(dias, valor, formato, { referencia, etiqueta } = {}) {
+  const tope = Math.max(...dias.map(valor), referencia || 0) || 1;
+  return html`<div class="columnas">
+    <div class="columnas-plot">
+      ${referencia ? html`<div class="columnas-referencia" data-nivel="${(100 * referencia) / tope}"><span>${etiqueta}</span></div>` : ""}
+      ${dias.map((d, i) => html`<div class="columna" tabindex="0" aria-label="${fechaCorta(d.fecha)}: ${formato(valor(d))}">
+        <span class="columna-marca" data-alto="${(100 * valor(d)) / tope}">${i === dias.length - 1
+          ? html`<span class="columna-valor">${formato(valor(d))}</span>` : ""}</span>
+        <span class="columna-dato">${fechaCorta(d.fecha)}: <strong>${formato(valor(d))}</strong></span>
+      </div>`)}
+    </div>
+    <div class="columnas-eje">${dias.map((d) => html`<span>${Number(d.fecha.slice(8, 10))}</span>`)}</div>
+  </div>`;
+}
+
+const ORDEN_FUENTES = {
+  piezas: { nombre: "Más piezas", clave: (f) => f.piezas },
+  gasto: { nombre: "Más gasto", clave: (f) => f.costo_estimado_usd },
+  saltar: { nombre: "Más descartadas", clave: (f) => partSaltada(f) ?? -1 },
+};
+const estadoGasto = { orden: "piezas", todas: false };
+
+function partSaltada(f) {
+  const conFicha = f.leer + f.resumen + f.saltar;
+  return conFicha ? f.saltar / conFicha : null;
+}
+
+async function vistaGasto() {
+  const datos = await leerJSON("datos/estadisticas/consumo.json").catch(() => null);
+  if (!datos) {
+    pintar(html`${pestanasDeEstado("gasto")}<header class="encabezado-vista"><h1>Gasto y piezas</h1></header>
+      <p class="nota">Las cifras aparecen después de la próxima recolección.</p>`);
+    return;
+  }
+  const { mes, tope_usd: tope } = datos;
+  const dias = datos.dias.slice(-7);
+  const alDia = tope / 30;
+  const sePasa = mes.mes_completo_usd > tope;
+  const totalPasos = datos.pasos.reduce((n, p) => n + p.usd, 0) || 1;
+  const fila = (f) => {
+    const saltada = partSaltada(f);
+    return html`<tr><th scope="row">${f.nombre}</th><td>${numero(f.piezas)}</td><td>${f.dias_en_el_tope || ""}</td>
+      <td>${saltada === null ? "—" : `${Math.round(100 * saltada)} %`}</td><td>${usd(f.costo_estimado_usd)}</td></tr>`;
+  };
+  const dibujarFuentes = () => {
+    const { clave } = ORDEN_FUENTES[estadoGasto.orden];
+    const lista = [...datos.fuentes].sort((a, b) => clave(b) - clave(a));
+    pintar(html`<div class="tabla"><table class="tabla-cifras">
+      <thead><tr><th scope="col">Fuente</th><th scope="col">Piezas</th><th scope="col">Días al tope</th>
+        <th scope="col">Claude saltó</th><th scope="col">Gasto estimado</th></tr></thead>
+      <tbody>${(estadoGasto.todas ? lista : lista.slice(0, 25)).map(fila)}</tbody></table></div>
+      ${lista.length > 25 ? html`<button class="boton-texto" type="button" id="todas-las-fuentes">${estadoGasto.todas
+        ? "Ver solo las primeras 25" : `Ver las ${lista.length}`}</button>` : ""}`, document.getElementById("fuentes-gasto"));
+    document.getElementById("todas-las-fuentes")?.addEventListener("click", () => {
+      estadoGasto.todas = !estadoGasto.todas;
+      dibujarFuentes();
+    });
+  };
+  pintar(html`
+    ${pestanasDeEstado("gasto")}
+    <header class="encabezado-vista">
+      <h1>Gasto y piezas</h1>
+      <p class="meta">Actualizado el ${fechaLarga(datos.generado)} a las ${hora(datos.generado)}, después de la recolección.</p>
+    </header>
+    <section class="tarjeta proyeccion">
+      <p class="meta">Un mes completo a este ritmo</p>
+      <p class="cifra-grande">${usd(mes.mes_completo_usd, 0)}</p>
+      <p>${sePasa ? html`<span class="insignia insignia-aviso">⚠ Se pasa del tope</span> de ${usd(tope, 0)}: con este ritmo, Mentor dejaría
+          de organizar hacia el día ${Math.max(1, Math.floor(tope / mes.promedio_diario_usd))} de cada mes.`
+        : html`<span class="insignia">✓ Cabe en el tope</span> de ${usd(tope, 0)}.`}</p>
+      <p class="meta">Promedio de ${usd(mes.promedio_diario_usd)} al día en los últimos ${mes.dias_del_promedio}
+        ${mes.dias_del_promedio === 1 ? "día" : "días"} con el formato nuevo. Este mes van ${usd(mes.total_usd)} y cerraría en
+        ${usd(mes.cierre_estimado_usd)}.</p>
+      <progress class="gasto" max="${tope}" value="${Math.min(mes.total_usd, tope)}"></progress>
+    </section>
+    <section class="tarjeta">
+      <h2>Gasto por día <span class="cuenta">${MESES_CORTOS[Number(dias.at(-1).fecha.slice(5, 7)) - 1]}</span></h2>
+      ${columnas(dias, (d) => d.costo_usd, (n) => usd(n), { referencia: alDia, etiqueta: `Lo que cabe en el tope: ${usd(alDia)} al día` })}
+    </section>
+    <section class="tarjeta">
+      <h2>Piezas por día <span class="cuenta">${MESES_CORTOS[Number(dias.at(-1).fecha.slice(5, 7)) - 1]}</span></h2>
+      ${columnas(dias, (d) => d.piezas, (n) => numero(n))}
+      <details class="mas"><summary>Ver los números</summary>
+        <div class="tabla"><table class="tabla-cifras"><thead><tr><th scope="col">Día</th><th scope="col">Piezas</th>
+          <th scope="col">Llamadas a Claude</th><th scope="col">Gasto</th></tr></thead>
+          <tbody>${dias.map((d) => html`<tr><th scope="row">${fechaCorta(d.fecha)}${d.formato_nuevo ? "" : " ·"}</th>
+            <td>${numero(d.piezas)}</td><td>${numero(d.llamadas)}</td><td>${usd(d.costo_usd)}</td></tr>`)}</tbody></table></div>
+        <p class="meta">· Días del resumen anterior, antes del formato nuevo.</p>
+      </details>
+    </section>
+    <section class="tarjeta">
+      <h2>En qué se gasta</h2>
+      <p class="meta">Los últimos días con el formato nuevo, por paso.</p>
+      <ul class="pasos-gasto">${datos.pasos.map((p) => html`<li>
+        <span class="paso-nombre">${p.paso}</span>
+        <span class="meta">${p.modelos.map((m) => MODELOS[m] || m).join(" y ")} · ${numero(p.llamadas)} llamadas</span>
+        <span class="paso-valor">${usd(p.usd)} <span class="meta">${Math.round((100 * p.usd) / totalPasos)} %</span></span>
+        <span class="paso-barra"><span data-ancho="${(100 * p.usd) / totalPasos}"></span></span>
+      </li>`)}</ul>
+    </section>
+    <section class="tarjeta">
+      <h2>Fuentes</h2>
+      <p class="meta">Los últimos 7 días. <strong>Días al tope:</strong> los días en que trajo el máximo de 30 piezas y quedó algo por fuera.
+        <strong>Claude saltó:</strong> la parte de sus piezas que Claude marcó para saltar. <strong>Gasto estimado:</strong> lo que cuesta
+        organizar cada día, repartido según las piezas de cada fuente (Claude cobra por llamada, no por fuente).</p>
+      <div class="chips" role="group" aria-label="Ordenar fuentes">${Object.entries(ORDEN_FUENTES).map(([clave, o]) => html`<button
+        class="chip" type="button" data-orden-gasto="${clave}" aria-pressed="${String(estadoGasto.orden === clave)}">${o.nombre}</button>`)}</div>
+      <div id="fuentes-gasto"></div>
+    </section>
+  `);
+  for (const el of contenido.querySelectorAll("[data-alto]")) el.style.height = `${el.dataset.alto}%`;
+  for (const el of contenido.querySelectorAll("[data-nivel]")) el.style.bottom = `${el.dataset.nivel}%`;
+  for (const el of contenido.querySelectorAll("[data-ancho]")) el.style.width = `${el.dataset.ancho}%`;
+  dibujarFuentes();
+  contenido.onclick = (evento) => {
+    const chip = evento.target.closest("[data-orden-gasto]");
+    if (!chip) return;
+    estadoGasto.orden = chip.dataset.ordenGasto;
+    for (const otro of contenido.querySelectorAll("[data-orden-gasto]")) otro.setAttribute("aria-pressed", String(otro === chip));
+    dibujarFuentes();
+  };
+}
+
+async function vistaEstado(sub) {
+  if (sub === "gasto") {
+    await vistaGasto();
+    return;
+  }
   const { ultima, indice, articulos } = await ultimaRecoleccion();
   const mes = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date()).slice(0, 7);
   const [registroFallas, feeds, costos] = await Promise.all([
@@ -1603,8 +1815,8 @@ async function vistaEstado() {
   const conFeed = Object.values(feeds).filter((f) => f.feed).length;
   const { repo } = config();
   pintar(html`
+    ${pestanasDeEstado("")}
     <header class="encabezado-vista">
-      <p class="sobretitulo">Cómo va el sistema</p>
       <h1>Estado</h1>
     </header>
     <section class="tarjeta">
@@ -1626,7 +1838,8 @@ async function vistaEstado() {
             de ${(costos.tope_usd || 95).toLocaleString("es-CO", { style: "currency", currency: "USD" })} de créditos ·
             ${numero(costos.llamadas)} llamadas a Claude</p>
           <progress class="gasto" max="${costos.tope_usd || 95}" value="${costos.total_usd}"></progress>
-          <p class="meta">Se paga con los créditos mensuales de tu plan Max. Si llega al tope, Claude deja de organizar las noticias y la recolección sigue.</p>`
+          <p class="meta">Se paga con los créditos mensuales de tu plan Max. Si llega al tope, Claude deja de organizar las noticias y la recolección sigue.
+            El detalle por día, por paso y por fuente está en <a href="#/estado/gasto">Gasto y piezas</a>.</p>`
         : html`<p>Sin consumo este mes.</p>`}
     </section>
     <section class="tarjeta">
@@ -2117,7 +2330,7 @@ async function enrutar() {
   contenido.classList.toggle("amplio", VISTAS_ANCHAS.has(vista));
   contenido.onclick = null;
   contenido.onchange = null;
-  botonPalabra.hidden = true;
+  menuSeleccion.hidden = true;
   contenido.innerHTML = '<p class="cargando">Cargando…</p>';
   try {
     await VISTAS[vista](decodeURIComponent(resto.join("/")));

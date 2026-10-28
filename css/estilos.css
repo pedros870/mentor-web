@@ -958,19 +958,33 @@ details.preguntar[open] > summary, details.seguir[open] > summary { margin-botto
 .preguntas-lector { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--borde); }
 .preguntas-lector h2, .preguntas-historia h2 { margin-bottom: 0.3rem; }
 
-.boton-palabra {
+.menu-seleccion {
   position: absolute;
   z-index: 20;
-  padding: 0.45rem 0.85rem;
-  border: 0;
+  display: flex;
+  gap: 2px;
+  padding: 3px;
   border-radius: 999px;
   background: var(--acento);
+  box-shadow: var(--sombra);
+}
+.menu-seleccion button {
+  padding: 0.45rem 0.8rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
   color: var(--acento-texto);
   font: 600 0.85rem var(--sans);
-  box-shadow: var(--sombra);
+  white-space: nowrap;
   cursor: pointer;
 }
-.boton-palabra[hidden] { display: none; }
+.menu-seleccion button:hover, .menu-seleccion button:focus-visible { background: rgb(0 0 0 / 0.15); }
+.menu-seleccion[hidden], .menu-seleccion button[hidden] { display: none; }
+
+/* Las frases que Pedro guarda, con lo que piensa de ellas. */
+.frase { padding: 1rem 0; border-top: 1px solid var(--borde); }
+.frase blockquote { margin: 0 0 0.4rem; padding-left: 0.9rem; border-left: 3px solid var(--acento); font-family: var(--serif); font-size: 1.1rem; line-height: 1.6; }
+.frase .reflexion { margin: 0.6rem 0 0; padding: 0.6rem 0.8rem; border-radius: 10px; background: var(--acento-suave); }
 .para-hacer { margin-top: 2.5rem; }
 
 /* ---------- Para ver: videos, cursos, conferencias y documentales ---------- */
@@ -1013,3 +1027,29 @@ details.preguntar[open] > summary, details.seguir[open] > summary { margin-botto
 .de-consulta { margin-bottom: 2rem; }
 .de-consulta .por-que { font-family: var(--serif); font-size: 1.05rem; line-height: 1.6; margin: 0 0 0.5rem; }
 .de-consulta .empezar .meta { display: block; }
+
+/* ---------- Estado: gasto y piezas ---------- */
+.proyeccion .cifra-grande { font-family: var(--sans); font-size: 2.6rem; font-weight: 600; line-height: 1.1; margin: 0.15rem 0 0.5rem; }
+.columnas { margin-top: 0.75rem; }
+.columnas-plot { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 170px; padding-top: 1.6rem; border-bottom: 1px solid var(--borde); }
+.columna { position: relative; flex: 1; display: flex; justify-content: center; align-items: flex-end; height: 100%; outline: none; }
+.columna-marca { position: relative; display: block; width: min(24px, 70%); min-height: 1px; background: var(--acento); border-radius: 4px 4px 0 0; }
+.columna-valor { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 4px; font-size: 0.8rem; font-weight: 600; color: var(--texto); white-space: nowrap; }
+.columna-dato { display: none; position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 2; padding: 0.3rem 0.55rem; border: 1px solid var(--borde); border-radius: 8px; background: var(--superficie); box-shadow: var(--sombra); font-size: 0.8rem; color: var(--texto); white-space: nowrap; }
+.columna:hover .columna-dato, .columna:focus-visible .columna-dato { display: block; }
+.columna:focus-visible .columna-marca { outline: 2px solid var(--texto); outline-offset: 2px; }
+.columnas-referencia { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--texto-suave); pointer-events: none; }
+.columnas-referencia span { position: absolute; left: 0; bottom: 2px; padding-right: 0.4rem; font-size: 0.75rem; color: var(--texto-suave); background: var(--superficie); }
+.columnas-eje { display: flex; gap: 2px; margin-top: 0.35rem; }
+.columnas-eje span { flex: 1; text-align: center; font-size: 0.75rem; color: var(--texto-suave); font-variant-numeric: tabular-nums; }
+.pasos-gasto { list-style: none; margin: 0.75rem 0 0; padding: 0; }
+.pasos-gasto li { display: grid; grid-template-columns: 1fr auto; gap: 0.1rem 1rem; padding: 0.6rem 0; border-top: 1px solid var(--borde); }
+.pasos-gasto .meta { grid-column: 1; }
+.paso-valor { grid-column: 2; grid-row: 1 / span 2; text-align: right; font-variant-numeric: tabular-nums; }
+.paso-valor .meta { display: block; }
+.paso-barra { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--acento-suave); overflow: hidden; }
+.paso-barra span { display: block; height: 100%; width: 0; background: var(--acento); border-radius: 3px; }
+.tabla-cifras { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+.tabla-cifras th, .tabla-cifras td { padding: 0.45rem 0.5rem; border-top: 1px solid var(--borde); text-align: right; font-variant-numeric: tabular-nums; }
+.tabla-cifras th[scope="row"], .tabla-cifras thead th:first-child { text-align: left; font-weight: 500; }
+.tabla-cifras thead th { color: var(--texto-suave); font-weight: 500; font-size: 0.8rem; border-top: 0; }
