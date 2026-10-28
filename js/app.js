@@ -458,6 +458,90 @@ async function vistaHoy(categoria) {
 
 // ---------- Lector ----------
 
+// ---------- Dónde quedó Pedro en una lectura larga ----------
+
+const CLAVE_AVANCE = "mentor-avance"; // en este navegador, para retomar al instante
+const MINIMO_DE_BLOQUES = 12; // con menos párrafos no es una lectura larga
+const GUARDAR_AVANCE_CADA = 180000;
+
+function avancesLocales() {
+  try { return JSON.parse(localStorage.getItem(CLAVE_AVANCE) || "{}"); } catch { return {}; }
+}
+
+// El párrafo donde quedó cada lectura: lo que se junta cada noche, las marcas de los últimos
+// días (de cualquier dispositivo) y lo de este navegador. Manda lo más reciente; "Lo leí" lo borra.
+async function avances() {
+  const mapa = new Map(Object.entries(await leerJSON("datos/biblioteca/progreso.json").catch(() => ({}))));
+  const poner = (archivo, a) => {
+    if ((mapa.get(archivo)?.fecha || "") < a.fecha) mapa.set(archivo, a);
+  };
+  for (const m of await todasLasMarcas()) {
+    if (!m.archivo) continue;
+    if (m.tipo === "progreso") poner(m.archivo, { parrafo: m.parrafo, total: m.total, fecha: m.ts });
+    else if (["leido", "calificacion"].includes(m.tipo) && m.valor !== false) poner(m.archivo, { borrado: true, fecha: m.ts });
+  }
+  for (const [archivo, a] of Object.entries(avancesLocales())) poner(archivo, a);
+  return new Map([...mapa].filter(([, a]) => !a.borrado));
+}
+
+const porcentaje = (a) => Math.min(99, Math.round((100 * (a.parrafo + 1)) / (a.total || 1)));
+
+// En el lector: una barra con lo leído, el botón para seguir donde quedó y, al salir
+// (o cada tres minutos), una marca con el párrafo que tenía a la vista.
+function seguirAvance(ruta, avance, leido) {
+  const bloques = [...contenido.querySelectorAll(".lector .cuerpo > *")];
+  if (bloques.length < MINIMO_DE_BLOQUES) return;
+  const barra = document.createElement("div");
+  barra.className = "avance-barra";
+  barra.innerHTML = "<span></span>";
+  contenido.querySelector(".lector").prepend(barra);
+  if (avance && !leido && avance.parrafo >= 2 && avance.parrafo < bloques.length - 2) {
+    const aviso = document.createElement("p");
+    aviso.className = "retomar";
+    aviso.innerHTML = `<button class="boton" type="button">Seguir donde quedaste</button>
+      <span class="meta">Vas en el ${porcentaje({ ...avance, total: bloques.length })} %</span>`;
+    contenido.querySelector(".lector header").append(aviso);
+    aviso.querySelector("button").addEventListener("click", () => {
+      const bloque = bloques[avance.parrafo];
+      bloque.classList.add("aqui-quedaste");
+      bloque.scrollIntoView({ block: "start" });
+      aviso.remove();
+    });
+  }
+  let actual = 0;
+  let enviado = avance?.parrafo ?? 0;
+  const medir = () => {
+    const tope = document.querySelector(".cabecera")?.getBoundingClientRect().bottom || 0;
+    const i = bloques.findIndex((b) => b.getBoundingClientRect().bottom > tope + 8);
+    actual = i === -1 ? bloques.length - 1 : i;
+    barra.firstChild.style.width = `${(100 * (actual + 1)) / bloques.length}%`;
+  };
+  const guardar = () => {
+    if (actual < 2 || actual === enviado) return;
+    enviado = actual;
+    const a = { parrafo: actual, total: bloques.length, fecha: new Date().toISOString() };
+    try {
+      localStorage.setItem(CLAVE_AVANCE, JSON.stringify({ ...avancesLocales(), [ruta]: a }));
+    } catch { /* sin almacenamiento: queda la marca */ }
+    marcar({ tipo: "progreso", archivo: ruta, parrafo: actual, total: bloques.length });
+  };
+  let cuadro = null;
+  const alDesplazar = () => {
+    if (!cuadro) cuadro = requestAnimationFrame(() => { cuadro = null; medir(); });
+  };
+  const alOcultar = () => { if (document.visibilityState === "hidden") guardar(); };
+  const cada = setInterval(guardar, GUARDAR_AVANCE_CADA);
+  window.addEventListener("scroll", alDesplazar, { passive: true });
+  document.addEventListener("visibilitychange", alOcultar);
+  window.addEventListener("hashchange", () => {
+    guardar();
+    window.removeEventListener("scroll", alDesplazar);
+    document.removeEventListener("visibilitychange", alOcultar);
+    clearInterval(cada);
+  }, { once: true });
+  medir();
+}
+
 async function vistaLector(ruta) {
   if (!/^datos\/(crudo|biblioteca)\/[\w/.-]+\.md$/.test(ruta)) throw new Error("La dirección no corresponde a un artículo.");
   const deLaBiblioteca = ruta.startsWith("datos/biblioteca/");
@@ -466,8 +550,8 @@ async function vistaLector(ruta) {
     .replace(/^\s*# .*\n/, "") // el título ya va en la cabecera
     .replace(/\n---\n\nSolo se obtuvo el extracto[\s\S]*$/, "");
   const extracto = ficha.extraccion === "extracto";
-  const [resumen, lectura, cuadernoLector] = await Promise.all([leerResumen().catch(() => null), estadoDeLectura(),
-    leerCuaderno().catch(() => [])]);
+  const [resumen, lectura, cuadernoLector, avancesGuardados] = await Promise.all([leerResumen().catch(() => null), estadoDeLectura(),
+    leerCuaderno().catch(() => []), avances()]);
   const hilosDeLaPieza = hilosDe(cuadernoLector).filter((x) => x[0].archivo === ruta && x[0].clase !== "palabra" && !x[0].archivada);
   const clasificacion = resumen?.titulares.find((t) => t.archivo === ruta);
   // Lo que el sistema recomendó leer completo (y lo de Para leer) se califica con
@@ -517,6 +601,7 @@ async function vistaLector(ruta) {
     </article>
   `);
 
+  seguirAvance(ruta, avancesGuardados.get(ruta), leido);
   const botonLeido = document.getElementById("leido");
   const marcarLeido = (valor) => {
     botonLeido.setAttribute("aria-pressed", String(valor));
@@ -844,7 +929,55 @@ function destinoDeLectura(l, enlace, guardada) {
   return l.url ? { href: l.url, externo: true, acceso: null, accion: "Buscar en la web" } : null;
 }
 
-function itemLectura({ l, destino, guardada, leida, segundo }) {
+// ---------- La fuente de consulta del día (scripts/consulta.py) ----------
+
+const DIAS_DE_CONSULTA = 7; // lo que no visitó en una semana se va; vuelve cuando le toque otra vez
+const LECTURA_CONSULTA = {
+  bloqueo: "Su sitio no deja entrar a programas", robots: "Su robots.txt no deja leerla", pago: "Es de pago",
+  sin_pagina: "En el catálogo no tiene página propia", no_encontrado: "Su dirección no respondió",
+  error_de_red: "Su sitio no respondió", error_del_sitio: "Su sitio dio un error",
+};
+const DECISION_CONSULTA = { consulta: "✓ Visitada", resume: "✓ Pasará a resumirse", fuera: "✓ Sale de tus fuentes" };
+
+async function fuentesDeConsulta() {
+  const [{ dias }, marcas] = await Promise.all([
+    leerJSON("datos/consulta/rutina.json").catch(() => ({ dias: [] })), todasLasMarcas()]);
+  const desde = new Date(Date.now() - (DIAS_DE_CONSULTA - 1) * 864e5).toISOString().slice(0, 10);
+  const decidida = new Map();
+  for (const m of marcas) if (m.tipo === "consulta_visitada") decidida.set(m.fuente_id, { valor: m.valor, ts: m.ts });
+  return dias.filter((d) => d.fecha >= desde).reverse()
+    .map((d) => ({ ...d, decision: decidida.get(d.fuente_id)?.ts.slice(0, 10) >= d.fecha ? decidida.get(d.fuente_id).valor : null }))
+    .filter((d, i) => i === 0 || !d.decision);
+}
+
+function itemConsulta(d, i) {
+  const busqueda = /google\.com\/search/.test(d.url || "");
+  return html`<li><details class="noticia${d.decision ? " apagada" : ""}" ${i === 0 && !d.decision ? "open" : ""}>
+    <summary>
+      <span class="noticia-titulo">${d.nombre}</span>
+      <span class="noticia-meta">${i === 0 ? "Hoy · " : ""}${d.tema}</span>
+    </summary>
+    <div class="noticia-cuerpo">
+      ${d.por_que || d.que_es ? html`<p class="por-que">${d.por_que || d.que_es}</p>` : ""}
+      ${d.como_usarla ? html`<p class="meta">${d.como_usarla}</p>` : ""}
+      ${d.empezar ? html`<p class="empezar">Para empezar: <a href="${d.empezar.url}" target="_blank" rel="noopener noreferrer">${d.empezar.titulo} ↗</a>
+        ${d.empezar.nota ? html`<span class="meta">${d.empezar.nota}</span>` : ""}</p>` : ""}
+      ${d.lectura !== "abierta" ? html`<p class="meta">${LECTURA_CONSULTA[d.lectura] || "No se pudo leer su página"}: entra tú.</p>` : ""}
+      <div class="acciones-lectura">
+        ${d.url ? html`<a class="boton-secundario" href="${d.url}" target="_blank" rel="noopener noreferrer">${busqueda ? "Buscarla" : "Ir a la fuente"} ↗</a>` : ""}
+        ${Object.entries({ consulta: "La visité", resume: "Que se resuma", fuera: "No me sirve" }).map(([estado, texto]) =>
+          html`<button class="boton-secundario" type="button" data-consulta="${d.fuente_id}" data-estado="${estado}"
+            aria-pressed="${String(d.decision === estado)}">${d.decision === estado ? DECISION_CONSULTA[estado] : texto}</button>`)}
+      </div>
+    </div>
+  </details></li>`;
+}
+
+function insigniaAvance(avance) {
+  return avance ? html`<span class="insignia insignia-acento">Vas en el ${porcentaje(avance)} %</span>` : "";
+}
+
+function itemLectura({ l, destino, guardada, leida, segundo, avance }) {
   const abrir = (clase, texto) => destino
     ? html`<a class="${clase}" href="${destino.href}"${destino.externo ? html` target="_blank" rel="noopener noreferrer"` : ""}>${texto}</a>`
     : html`<span class="${clase}">${texto}</span>`;
@@ -852,7 +985,7 @@ function itemLectura({ l, destino, guardada, leida, segundo }) {
   return html`<li class="lectura">
     ${abrir("articulo-titulo", l.titulo)}
     <span class="meta">${[l.autor, duracion].filter(Boolean).join(" · ")}</span>
-    <span class="insignias"><span class="insignia">${l.momento_final}</span><span class="insignia">${l.hoja_origen}</span>${destino?.acceso ? html`<span class="insignia${destino.acceso === "aqui" ? " insignia-acento" : ""}">${ACCESOS[destino.acceso]}</span>` : ""}</span>
+    <span class="insignias">${insigniaAvance(avance)}<span class="insignia">${l.momento_final}</span><span class="insignia">${l.hoja_origen}</span>${destino?.acceso ? html`<span class="insignia${destino.acceso === "aqui" ? " insignia-acento" : ""}">${ACCESOS[destino.acceso]}</span>` : ""}</span>
     ${l.por_que ? html`<p>${l.por_que}</p>` : ""}
     <div class="acciones-lectura">
       ${destino ? abrir("boton-secundario", `${destino.accion}${destino.externo ? " ↗" : ""}`) : ""}
@@ -863,13 +996,15 @@ function itemLectura({ l, destino, guardada, leida, segundo }) {
 }
 
 async function vistaParaLeer() {
-  const [{ lecturas }, { enlaces }, biblioteca, consolidado, lectura, guardadas] = await Promise.all([
+  const [{ lecturas }, { enlaces }, biblioteca, consolidado, lectura, guardadas, avance, deConsulta] = await Promise.all([
     leerJSON("catalogo/lecturas.json"),
     leerJSON("catalogo/lecturas_enlaces.json").catch(() => ({ enlaces: {} })),
     leerJSON("datos/biblioteca/indice.json").catch(() => ({})),
     leerJSON("datos/biblioteca/estado.json").catch(() => ({})),
     estadoDeLectura(),
     piezasGuardadas(),
+    avances(),
+    fuentesDeConsulta(),
   ]);
   // Leída si lo dice la biblioteca (que junta las marcas de cada noche) o una marca reciente.
   const leida = (l) => {
@@ -878,7 +1013,7 @@ async function vistaParaLeer() {
     return reciente ? lectura.leidos.has(reciente) : Boolean(consolidado[l.id]?.leida);
   };
   const conDestino = (l) => ({ l, destino: destinoDeLectura(l, enlaces[l.id], biblioteca[l.id]), guardada: biblioteca[l.id],
-    segundo: enlaces[l.id]?.enlace_2, leida: false });
+    segundo: enlaces[l.id]?.enlace_2, leida: false, avance: avance.get(biblioteca[l.id]?.archivo) });
   const enOrden = lecturas
     .filter((l) => l.momento_final !== "Ya leído" && !leida(l))
     .sort((a, b) => (ORDEN_MOMENTO[a.momento_final] ?? 9) - (ORDEN_MOMENTO[b.momento_final] ?? 9)
@@ -893,11 +1028,18 @@ async function vistaParaLeer() {
       <p class="sobretitulo">${pendientes.length} lecturas en la cola</p>
       <h1>Para leer</h1>
     </header>
+    ${deConsulta.length ? html`<section class="de-consulta">
+      <h2>De tu consulta</h2>
+      <p class="nota">Cada día, una de las fuentes que no se recolectan, para que no se queden guardadas.
+        Visítala y decide: sigue en consulta, se resume o sale. Lo que no visites en una semana vuelve cuando le toque.</p>
+      <ol class="relevante" id="de-consulta">${deConsulta.map(itemConsulta)}</ol>
+    </section>` : ""}
     ${guardadas.size ? html`<section class="guardadas">
       <h2>Guardadas desde las noticias <span class="cuenta">${guardadas.size}</span></h2>
       <ul class="lista-lecturas" id="guardadas">${[...guardadas].reverse().map(([archivo, g]) => html`<li class="lectura">
         <a class="articulo-titulo" href="${enlaceLector({ archivo })}">${g.titulo}</a>
         <span class="meta">${[g.fuente, g.minutos ? `${g.minutos} min` : "", g.fecha ? `guardada el ${fechaCorta(g.fecha)}` : ""].filter(Boolean).join(" · ")}</span>
+        ${avance.has(archivo) ? html`<span class="insignias">${insigniaAvance(avance.get(archivo))}</span>` : ""}
         <div class="acciones-lectura">
           <a class="boton-secundario" href="${enlaceLector({ archivo })}">Leer aquí</a>
           ${g.url ? html`<a class="boton-secundario" href="${g.url}" target="_blank" rel="noopener noreferrer">Original ↗</a>` : ""}
@@ -943,6 +1085,23 @@ async function vistaParaLeer() {
     pintar(html`${halladas.slice(0, 40).map(itemLectura)}`, lista);
   };
   buscar.addEventListener("input", dibujar);
+  // La fuente de consulta del día: visitarla, pasarla a resumirse o sacarla (la misma marca de Fuentes).
+  document.getElementById("de-consulta")?.addEventListener("click", (evento) => {
+    const boton = evento.target.closest("[data-consulta]");
+    if (!boton) return;
+    const { consulta: fuente, estado } = boton.dataset;
+    const botones = [...boton.parentElement.querySelectorAll("[data-consulta]")];
+    const anterior = botones.find((b) => b.getAttribute("aria-pressed") === "true")?.dataset.estado || "consulta";
+    marcar({ tipo: "consulta_visitada", fuente_id: fuente, valor: estado });
+    if (estado !== anterior) marcar({ tipo: "fuente", campo: "estado", fuente_id: fuente, valor: estado, anterior });
+    const textos = { consulta: "La visité", resume: "Que se resuma", fuera: "No me sirve" };
+    for (const b of botones) {
+      b.setAttribute("aria-pressed", String(b === boton));
+      b.textContent = b === boton ? DECISION_CONSULTA[b.dataset.estado] : textos[b.dataset.estado];
+    }
+    boton.closest("details").classList.add("apagada");
+    avisar({ consulta: "Sigue en consulta", resume: "Se resumirá desde la próxima recolección", fuera: "Sale de tus fuentes" }[estado]);
+  });
   // Quitar una guardada la deja a la vista hasta la próxima visita, para poder deshacerlo.
   document.getElementById("guardadas")?.addEventListener("click", (evento) => {
     const boton = evento.target.closest("[data-guardar]");

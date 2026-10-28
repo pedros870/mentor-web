@@ -1003,3 +1003,13 @@ details.preguntar[open] > summary, details.seguir[open] > summary { margin-botto
 .lista-canales .articulo-titulo:hover { color: var(--acento); }
 .lista-canales p { margin: 0.2rem 0 0; font-family: var(--serif); font-size: 1rem; line-height: 1.55; }
 .lista-canales .empezar { font-family: var(--sans); font-size: 0.9rem; color: var(--texto-suave); }
+
+/* Lecturas largas: lo leído, en una línea arriba, y el botón para seguir donde quedó. */
+.avance-barra { position: fixed; top: 0; left: 0; right: 0; height: 3px; z-index: 20; pointer-events: none; }
+.avance-barra span { display: block; height: 100%; width: 0; background: var(--acento); transition: width 0.2s ease-out; }
+.retomar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem 0.9rem; margin: 1rem 0 0; }
+.aqui-quedaste { scroll-margin-top: 5rem; box-shadow: -0.9rem 0 0 -0.6rem var(--acento); animation: aqui-quedaste 3s ease-out; }
+@keyframes aqui-quedaste { from { background: var(--acento-suave); } to { background: transparent; } }
+.de-consulta { margin-bottom: 2rem; }
+.de-consulta .por-que { font-family: var(--serif); font-size: 1.05rem; line-height: 1.6; margin: 0 0 0.5rem; }
+.de-consulta .empezar .meta { display: block; }
