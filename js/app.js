@@ -1052,6 +1052,22 @@ function itemParaVer(item, visto) {
   </details></li>`;
 }
 
+// Un canal de "Tus canales": de qué trata y por dónde entrar. La ficha la escribe Claude en para_ver.json.
+function itemCanal(f, ficha) {
+  const enlace = ficha.ruta ? `https://www.youtube.com/${ficha.ruta}` : f.url;
+  const autor = f.autor_o_responsable && !["Anonimo", "Equipo", f.nombre].includes(f.autor_o_responsable) ? f.autor_o_responsable : "";
+  const meta = [autor, NIVELES_CANAL[f.etiquetas[1]] || f.etiquetas[1], ficha.idioma].filter(Boolean).join(" · ");
+  const empezar = ficha.empezar_youtube ? `https://www.youtube.com/watch?v=${ficha.empezar_youtube}`
+    : ficha.empezar_lista ? `https://www.youtube.com/playlist?list=${ficha.empezar_lista}` : null;
+  return html`<li>
+    <a class="articulo-titulo" href="${enlace}" target="_blank" rel="noopener noreferrer">${f.nombre} ↗</a>
+    ${meta ? html`<span class="meta">${meta}</span>` : ""}
+    ${ficha.que_es ? html`<p>${ficha.que_es}</p>` : ""}
+    ${ficha.empezar ? html`<p class="empezar">Para empezar: ${empezar
+      ? html`<a href="${empezar}" target="_blank" rel="noopener noreferrer">${ficha.empezar}</a>` : ficha.empezar}</p>` : ""}
+  </li>`;
+}
+
 // Al abrir un video se carga el reproductor; al cerrarlo se quita, para que no siga sonando.
 function alAbrirVideo(evento) {
   const detalles = evento.target;
@@ -1076,12 +1092,15 @@ function alAbrirVideo(evento) {
 
 async function vistaParaVer(ruta) {
   const sub = SUBPESTANAS_VER.find((s) => s.slug === ruta) || SUBPESTANAS_VER[0];
-  const [{ items, grupos_de_canales: grupos }, entradas, consolidado, lectura, fuentes] = await Promise.all([
+  const enVideos = (ruta) => sub.slug === "videos" ? leerJSON(ruta).catch(() => null) : null;
+  const [{ items, grupos_de_canales: grupos, canales: fichas = {} }, entradas, consolidado, lectura, fuentes, clasificacion, reclasificadas] = await Promise.all([
     leerJSON("catalogo/para_ver.json"),
     leerCuaderno().catch(() => []),
     leerJSON("datos/biblioteca/estado.json").catch(() => ({})),
     estadoDeLectura(),
-    sub.slug === "videos" ? leerJSON("catalogo/fuentes.json") : null,
+    enVideos("catalogo/fuentes.json"),
+    enVideos("catalogo/clasificacion_fuentes.json"),
+    enVideos("catalogo/reclasificaciones.json"),
   ]);
   const visto = (id) => {
     const clave = `lectura:${id}`;
@@ -1104,7 +1123,9 @@ async function vistaParaVer(ruta) {
   const deLa = (s) => todos.filter((i) => s.clases.includes(i.clase));
   const lista = deLa(sub);
   const ordenada = [...lista.filter((i) => !visto(i.id)), ...lista.filter((i) => visto(i.id))];
-  const canales = fuentes ? fuentes.fuentes.filter((f) => f.hoja_origen === "Canales" && f.canal_final !== "Fuera") : [];
+  // Todos los canales del catálogo, salvo los que Pedro saque desde Fuentes.
+  const estadoDe = (f) => reclasificadas?.fuentes[f.id]?.estado || clasificacion?.fuentes[f.id]?.estado;
+  const canales = fuentes ? fuentes.fuentes.filter((f) => f.hoja_origen === "Canales" && estadoDe(f) !== "fuera") : [];
   const grupoDe = new Map(Object.entries(grupos).flatMap(([g, etiquetas]) => etiquetas.map((e) => [e, g])));
   const deCadaGrupo = agrupar(canales, (f) => grupoDe.get(f.etiquetas[0]) || "Otros");
   const porGrupo = [...Object.keys(grupos), "Otros"].filter((g) => deCadaGrupo.has(g)).map((g) => [g, deCadaGrupo.get(g)]);
@@ -1127,12 +1148,11 @@ async function vistaParaVer(ruta) {
       : html`<p class="nota">Todavía no hay nada aquí. Pega un enlace arriba y Claude le hace la ficha.</p>`}
     ${canales.length ? html`<section class="canales">
       <h2>Tus canales <span class="cuenta">${canales.length}</span></h2>
-      <p class="nota">Los canales de tu catálogo que dejaste para consultar. YouTube no deja que un programa lea los videos
-        nuevos de un canal, así que por ahora cada uno abre su búsqueda en YouTube.</p>
+      <p class="nota">No son para verlos completos ni en orden: es un directorio para entrar cuando un tema te provoque.
+        Cada uno dice de qué trata y por dónde empezar. Si un video te gusta, pega su enlace arriba y queda en tu lista.</p>
       ${porGrupo.map(([grupo, lista]) => html`<details class="mas">
         <summary>${grupo} (${lista.length})</summary>
-        <ul class="lista-compacta">${lista.map((f) => html`<li><a href="${f.url}" target="_blank" rel="noopener noreferrer">
-          <span class="articulo-titulo">${f.nombre}</span><span class="meta">${NIVELES_CANAL[f.etiquetas[1]] || f.etiquetas[1] || ""}</span></a></li>`)}</ul>
+        <ul class="lista-canales">${lista.map((f) => itemCanal(f, fichas[f.id] || {}))}</ul>
       </details>`)}
     </section>` : ""}
   `);

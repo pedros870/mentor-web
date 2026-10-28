@@ -997,3 +997,9 @@ details.preguntar[open] > summary, details.seguir[open] > summary { margin-botto
 .para-ver .por-que { font-family: var(--serif); font-size: 1.05rem; line-height: 1.6; margin: 0 0 0.75rem; }
 .canales { margin-top: 2.5rem; }
 .canales details.mas { margin-top: 0.4rem; }
+.lista-canales { list-style: none; margin: 0.5rem 0 0; padding: 0; }
+.lista-canales li { display: flex; flex-direction: column; gap: 0.15rem; padding: 0.75rem 0; border-top: 1px solid var(--borde); }
+.lista-canales .articulo-titulo { color: var(--texto); text-decoration: none; font-size: 1rem; }
+.lista-canales .articulo-titulo:hover { color: var(--acento); }
+.lista-canales p { margin: 0.2rem 0 0; font-family: var(--serif); font-size: 1rem; line-height: 1.55; }
+.lista-canales .empezar { font-family: var(--sans); font-size: 0.9rem; color: var(--texto-suave); }
