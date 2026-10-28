@@ -126,11 +126,10 @@ function itemArticulo(a) {
   </a></li>`;
 }
 
-// ---------- Hoy: el resumen de la mañana ----------
+// ---------- Lo que Claude recomienda y lo que Pedro leyó ----------
 
 const RECOMENDACIONES = { leer: "Leer completo", resumen: "Basta el resumen", saltar: "Saltar" };
 const ORDEN_RECOMENDACION = { leer: 0, resumen: 1, saltar: 2 };
-const estadoResumen = { abierta: null };
 
 async function leerResumen() {
   try {
@@ -170,290 +169,6 @@ async function estadoDeLectura() {
     }
   }
   return { leidos, calificaciones, notas, listas, preferencias, marcadas };
-}
-
-// Parte una sección en temas: cada párrafo empieza con lo que cambió, en
-// negrita; eso es el titular y el resto es el detalle que se abre al tocarlo.
-function temasDeSeccion(texto) {
-  const grupos = [];
-  let grupo = null;
-  for (const bloque of texto.replace(/\r\n/g, "\n").split(/\n\s*\n/)) {
-    let resto = bloque.trim();
-    if (!resto) continue;
-    const subtitulo = resto.match(/^#{1,6}\s+(.+)(?:\n|$)/);
-    if (subtitulo) {
-      grupo = { titulo: subtitulo[1].trim(), temas: [] };
-      grupos.push(grupo);
-      resto = resto.slice(subtitulo[0].length).trim();
-      if (!resto) continue;
-    }
-    if (!grupo) {
-      grupo = { titulo: null, temas: [] };
-      grupos.push(grupo);
-    }
-    const negrita = resto.match(/^\*\*(.+?)\*\*\s*([\s\S]*)$/);
-    if (negrita) {
-      // Si el detalle sigue la frase del titular, se marca con puntos suspensivos.
-      const detalle = /^[a-záéíóúñ(]/.test(negrita[2]) ? `… ${negrita[2]}` : negrita[2];
-      grupo.temas.push({ titular: negrita[1], detalle });
-    } else {
-      const corte = resto.search(/[.!?](\s|$)/);
-      grupo.temas.push(corte > 0
-        ? { titular: resto.slice(0, corte + 1), detalle: resto.slice(corte + 1).trim() }
-        : { titular: resto, detalle: "" });
-    }
-  }
-  return grupos.filter((g) => g.temas.length);
-}
-
-function marcaDeLeido(lectura, archivo) {
-  return lectura.leidos.has(archivo) ? html`<span class="leido" title="Leído">✓</span>` : "";
-}
-
-function itemTitular(t, lectura) {
-  return html`<li><a class="articulo" href="${enlaceLector(t)}">
-    <span class="articulo-titulo">${marcaDeLeido(lectura, t.archivo)}${t.titulo}</span>
-    <span class="meta"><span class="insignia insignia-${t.recomendacion}">${RECOMENDACIONES[t.recomendacion]}</span> ${t.fuente} · ${t.minutos} min${t.fuentes_historia > 1 ? ` · historia de ${t.fuentes_historia} fuentes` : ""}</span>
-    <span class="razon">${t.razon}</span>
-  </a></li>`;
-}
-
-function pintarResumen(r, lectura, aviso) {
-  const estaLista = (categoria) => lectura.listas.get(`${r.fecha}|${categoria}`) === true;
-  const listas = r.categorias.filter((c) => estaLista(c.nombre)).length;
-  const porCategoria = agrupar(r.titulares, (t) => t.categoria);
-  const orden = (a, b) => ORDEN_RECOMENDACION[a.recomendacion] - ORDEN_RECOMENDACION[b.recomendacion]
-    || b.relevancia - a.relevancia;
-
-  const tema = (c, t) => {
-    const preferencia = lectura.preferencias.get(`${r.fecha}|${c.nombre}|${t.titular}`);
-    return html`<li><details class="tema">
-      <summary>${seguro(enLinea(t.titular))}</summary>
-      <div class="tema-detalle">
-        ${seguro(markdownAHtml(t.detalle))}
-        <div class="preferencias" data-categoria="${c.nombre}" data-tema="${t.titular}">
-          <button class="chip" type="button" data-preferencia="mas" aria-pressed="${String(preferencia === "mas")}">Más de esto</button>
-          <button class="chip" type="button" data-preferencia="menos" aria-pressed="${String(preferencia === "menos")}">Menos de esto</button>
-        </div>
-      </div>
-    </details></li>`;
-  };
-
-  // Formato 2 (desde el 23 de octubre): un texto corrido por categoría y, debajo,
-  // las noticias en que se apoya. El formato 1 partía el texto en temas.
-  const cuerpoCorrido = (c) => {
-    const preferencia = lectura.preferencias.get(`${r.fecha}|${c.nombre}|`);
-    return html`<div class="cuerpo cuerpo-resumen">${seguro(markdownAHtml(c.texto))}</div>
-      <h3 class="grupo">Las noticias</h3>
-      <ul class="lista-compacta">${c.articulos.map((a) => html`<li><a href="${enlaceLector(a)}">
-        <span class="articulo-titulo">${marcaDeLeido(lectura, a.archivo)}${a.titulo}</span>
-        <span class="meta">${a.fuente} · ${a.minutos} min</span>
-      </a></li>`)}</ul>
-      <div class="preferencias" data-categoria="${c.nombre}" data-tema="">
-        <button class="chip" type="button" data-preferencia="mas" aria-pressed="${String(preferencia === "mas")}">Más de esto</button>
-        <button class="chip" type="button" data-preferencia="menos" aria-pressed="${String(preferencia === "menos")}">Menos de esto</button>
-      </div>`;
-  };
-
-  // Formato 3 (desde el 23 de octubre): por tema, hallazgos que sintetizan lo
-  // encontrado; los artículos de cada hallazgo quedan plegados para profundizar.
-  const cuerpoHallazgos = (c) => {
-    const preferencia = lectura.preferencias.get(`${r.fecha}|${c.nombre}|`);
-    return html`${c.hallazgos.map((h) => html`<div class="hallazgo">
-        <div class="cuerpo cuerpo-resumen">${seguro(markdownAHtml(h.texto))}</div>
-        <details class="profundizar">
-          <summary>${h.articulos.length === 1 ? "1 artículo" : `${h.articulos.length} artículos`} para profundizar</summary>
-          <ul class="lista-compacta">${h.articulos.map((a) => html`<li><a href="${enlaceLector(a)}">
-            <span class="articulo-titulo">${marcaDeLeido(lectura, a.archivo)}${a.titulo}</span>
-            <span class="meta">${a.fuente} · ${a.minutos} min</span>
-          </a></li>`)}</ul>
-        </details>
-      </div>`)}
-      <div class="preferencias" data-categoria="${c.nombre}" data-tema="">
-        <button class="chip" type="button" data-preferencia="mas" aria-pressed="${String(preferencia === "mas")}">Más de esto</button>
-        <button class="chip" type="button" data-preferencia="menos" aria-pressed="${String(preferencia === "menos")}">Menos de esto</button>
-      </div>`;
-  };
-
-  const seccion = (c) => {
-    const hallazgos = Array.isArray(c.hallazgos);
-    const corrido = !hallazgos && Array.isArray(c.articulos);
-    const grupos = hallazgos || corrido ? [] : temasDeSeccion(c.texto);
-    const lista = estaLista(c.nombre);
-    const cuenta = hallazgos ? c.hallazgos.length : corrido ? c.articulos.length : grupos.reduce((n, g) => n + g.temas.length, 0);
-    const unidad = hallazgos ? (cuenta === 1 ? "hallazgo" : "hallazgos")
-      : corrido ? (cuenta === 1 ? "noticia" : "noticias") : (cuenta === 1 ? "tema" : "temas");
-    return html`<details class="seccion${lista ? " lista" : ""}" name="secciones" data-categoria="${c.nombre}" ${estadoResumen.abierta === c.nombre ? "open" : ""}>
-      <summary>
-        <span class="seccion-titulo">${lista ? "✓ " : ""}${c.nombre}</span>
-        <span class="meta">${cuenta} ${unidad}</span>
-      </summary>
-      <div class="seccion-cuerpo">
-        ${hallazgos ? cuerpoHallazgos(c) : corrido ? cuerpoCorrido(c)
-          : grupos.map((g) => html`${g.titulo ? html`<h3 class="grupo">${g.titulo}</h3>` : ""}<ul class="temas">${g.temas.map((t) => tema(c, t))}</ul>`)}
-        <div class="acciones">
-          <button class="boton" type="button" data-lista="${c.nombre}">${lista ? "Volver a pendiente" : "Listo"}</button>
-        </div>
-      </div>
-    </details>`;
-  };
-
-  pintar(html`
-    <header class="encabezado-vista">
-      <p class="sobretitulo">Resumen del ${fechaLarga(r.fecha)} · formato anterior</p>
-      <h1>Resumen de la mañana</h1>
-      <a class="aviso-nuevo" href="#/hoy">Volver a Hoy →</a>
-      <div class="progreso">
-        <progress max="${r.categorias.length}" value="${listas}"></progress>
-        <span class="meta">${listas === r.categorias.length ? "Todo listo" : `${listas} de ${r.categorias.length} listas`} · unos ${r.minutos} min</span>
-      </div>
-    </header>
-    ${aviso && aviso.generado > r.generado ? html`<p class="aviso">${aviso.texto}</p>` : ""}
-    ${r.importante?.length ? html`<section class="importante">
-      <h2>Lo importante hoy</h2>
-      <ol>${r.importante.map((i) => html`<li>
-        <p>${seguro(enLinea(i.texto))}</p>
-        <details class="profundizar">
-          <summary>${i.fuentes > 1 ? `${i.fuentes} fuentes` : "1 fuente"} · ver ${i.articulos.length === 1 ? "el artículo" : `${i.articulos.length} artículos`}</summary>
-          <ul class="lista-compacta">${i.articulos.map((a) => html`<li><a href="${enlaceLector(a)}">
-            <span class="articulo-titulo">${marcaDeLeido(lectura, a.archivo)}${a.titulo}</span>
-            <span class="meta">${a.fuente} · ${a.minutos} min</span>
-          </a></li>`)}</ul>
-        </details>
-      </li>`)}</ol>
-    </section>` : ""}
-    ${r.aviso_noche ? (r.aviso_noche_archivo
-      ? html`<a class="aviso-noche" href="${enlaceLector({ archivo: r.aviso_noche_archivo })}">${marcaDeLeido(lectura, r.aviso_noche_archivo)}${r.aviso_noche} <span class="leer-ahora">Leer →</span></a>`
-      : html`<p class="aviso-noche">${r.aviso_noche}</p>`) : ""}
-    ${r.lecturas_del_dia.length ? html`<section class="lecturas-del-dia">
-      <h2>Para leer completo</h2>
-      <ul class="lista-compacta">${r.lecturas_del_dia.map((l) => html`<li><a href="${enlaceLector(l)}">
-        <span class="articulo-titulo">${marcaDeLeido(lectura, l.archivo)}${l.titulo}</span>
-        <span class="meta">${l.fuente} · ${l.minutos} min</span>
-      </a></li>`)}</ul>
-    </section>` : ""}
-    <section class="secciones">${r.categorias.map(seccion)}</section>
-    <details class="tarjeta titulares">
-      <summary>Todos los titulares <span class="cuenta">${numero(r.titulares.length)}</span></summary>
-      <p class="nota">Cada artículo revisado, con la recomendación de Claude. Lo que conviene saltar queda plegado.</p>
-      ${CATEGORIAS.filter((c) => porCategoria.has(c)).map((c) => {
-        const todos = porCategoria.get(c);
-        const destacados = todos.filter((t) => t.recomendacion !== "saltar").sort(orden);
-        const saltar = todos.filter((t) => t.recomendacion === "saltar").sort(orden);
-        return html`<details class="grupo-titulares">
-          <summary>${c} <span class="cuenta">${destacados.length} de ${todos.length}</span></summary>
-          <ul class="lista-articulos">${destacados.map((t) => itemTitular(t, lectura))}</ul>
-          ${saltar.length ? html`<button class="boton-texto" type="button" data-saltos>Ver ${saltar.length} para saltar</button>
-            <ul class="lista-articulos" hidden>${saltar.map((t) => itemTitular(t, lectura))}</ul>` : ""}
-        </details>`;
-      })}
-    </details>
-    <p class="nota">${r.autor}. ${r.nota || ""}</p>
-  `);
-
-  contenido.onclick = (evento) => {
-    const saltos = evento.target.closest("[data-saltos]");
-    const botonLista = evento.target.closest("[data-lista]");
-    const preferencia = evento.target.closest("[data-preferencia]");
-    if (saltos) {
-      saltos.nextElementSibling.hidden = false;
-      saltos.remove();
-    } else if (botonLista) {
-      const categoria = botonLista.dataset.lista;
-      const nueva = !estaLista(categoria);
-      marcar({ tipo: "categoria", resumen: r.fecha, categoria, estado: nueva ? "lista" : "pendiente" });
-      lectura.listas.set(`${r.fecha}|${categoria}`, nueva);
-      // Al terminar una categoría se abre la siguiente pendiente.
-      const siguiente = r.categorias.find((c) => !estaLista(c.nombre));
-      estadoResumen.abierta = nueva ? siguiente?.nombre ?? null : categoria;
-      pintarResumen(r, lectura);
-      avisar(nueva ? `${categoria}: lista` : `${categoria}: pendiente`);
-      contenido.querySelector("details.seccion[open]")?.scrollIntoView({ behavior: "smooth", block: "start" });
-    } else if (preferencia) {
-      const grupo = preferencia.parentElement;
-      const clave = `${r.fecha}|${grupo.dataset.categoria}|${grupo.dataset.tema}`;
-      const valor = lectura.preferencias.get(clave) === preferencia.dataset.preferencia ? null : preferencia.dataset.preferencia;
-      lectura.preferencias.set(clave, valor);
-      marcar({ tipo: "preferencia", resumen: r.fecha, categoria: grupo.dataset.categoria, tema: grupo.dataset.tema, valor });
-      for (const boton of grupo.querySelectorAll("[data-preferencia]")) {
-        boton.setAttribute("aria-pressed", String(boton.dataset.preferencia === valor));
-      }
-      avisar(valor === "mas" ? "Anotado: más de esto" : valor === "menos" ? "Anotado: menos de esto" : "Preferencia quitada");
-    }
-  };
-  // Recordar qué sección quedó abierta, para volver a ella desde el lector.
-  for (const detalle of contenido.querySelectorAll("details.seccion")) {
-    detalle.addEventListener("toggle", () => {
-      if (detalle.open) estadoResumen.abierta = detalle.dataset.categoria;
-      else if (estadoResumen.abierta === detalle.dataset.categoria) estadoResumen.abierta = null;
-    });
-  }
-}
-
-// ---------- Hoy sin resumen: los titulares recolectados ----------
-
-const estadoHoy = { filtro: "todas", abiertas: new Set() };
-const VISIBLES_POR_CATEGORIA = 6;
-
-async function vistaHoy(categoria) {
-  if (categoria) estadoResumen.abierta = categoria; // #/hoy/<categoría> abre esa sección
-  const resumen = await leerResumen();
-  if (resumen) {
-    // Si el último intento no pudo escribir resumen (por ejemplo, sin créditos), se avisa.
-    const aviso = await leerJSON("datos/resumenes/aviso.json").catch(() => null);
-    pintarResumen(resumen, await estadoDeLectura(), aviso);
-    return;
-  }
-  const { ultima, articulos } = await ultimaRecoleccion();
-  const porCategoria = agrupar(
-    [...articulos].sort((a, b) => (b.fecha_publicacion || "").localeCompare(a.fecha_publicacion || "")),
-    (a) => a.categoria_inicial || "Sin categoría",
-  );
-  const categorias = [...CATEGORIAS.filter((c) => porCategoria.has(c)),
-    ...[...porCategoria.keys()].filter((c) => !CATEGORIAS.includes(c))];
-
-  const dibujar = () => {
-    const elegidas = estadoHoy.filtro === "todas" ? categorias : [estadoHoy.filtro];
-    pintar(html`
-      <header class="encabezado-vista">
-        <p class="sobretitulo">Recolección del ${fechaLarga(ultima.fecha)}</p>
-        <h1>Hoy</h1>
-      </header>
-      <section class="tarjeta tarjeta-resumen">
-        <h2>Resumen de la mañana</h2>
-        <p>Todavía no hay resumen: Claude empieza a escribirlo en la etapa 2. Por ahora ves los
-          ${numero(articulos.length)} titulares recolectados, ordenados por la categoría de su fuente.</p>
-        <button class="boton" type="button" disabled>Pedir resumen</button>
-      </section>
-      <div class="chips" role="group" aria-label="Filtrar por categoría">
-        <button class="chip" type="button" data-filtro="todas" aria-pressed="${String(estadoHoy.filtro === "todas")}">Todas <span>${articulos.length}</span></button>
-        ${categorias.map((c) => html`<button class="chip" type="button" data-filtro="${c}" aria-pressed="${String(estadoHoy.filtro === c)}">${c} <span>${porCategoria.get(c).length}</span></button>`)}
-      </div>
-      ${elegidas.map((c) => {
-        const lista = porCategoria.get(c);
-        const abierta = estadoHoy.filtro !== "todas" || estadoHoy.abiertas.has(c);
-        const visibles = abierta ? lista : lista.slice(0, VISIBLES_POR_CATEGORIA);
-        return html`<section class="categoria">
-          <h2>${c} <span class="cuenta">${lista.length}</span></h2>
-          <ul class="lista-articulos">${visibles.map(itemArticulo)}</ul>
-          ${visibles.length < lista.length ? html`<button class="boton-texto" type="button" data-abrir="${c}">Ver ${lista.length - visibles.length} más</button>` : ""}
-        </section>`;
-      })}
-    `);
-  };
-
-  contenido.onclick = (evento) => {
-    const filtro = evento.target.closest("[data-filtro]");
-    const abrir = evento.target.closest("[data-abrir]");
-    if (filtro) {
-      estadoHoy.filtro = filtro.dataset.filtro;
-      dibujar();
-    } else if (abrir) {
-      estadoHoy.abiertas.add(abrir.dataset.abrir);
-      dibujar();
-    }
-  };
-  dibujar();
 }
 
 // ---------- Lector ----------
@@ -652,13 +367,6 @@ const TEMAS_DE_FUENTE = [...CATEGORIAS, "Varios temas"];
 const ESTADOS = { resume: "Se resume", consulta: "Consulta", fuera: "Fuera" };
 const estadoFuentes = { filtro: "todas", buscar: "", abiertos: new Set() };
 
-function pestanasDeFuentes(activa) {
-  return html`<div class="segmentos" role="tablist">
-    <a role="tab" href="#/fuentes" aria-selected="${String(activa === "fuentes")}">Tus fuentes</a>
-    <a role="tab" href="#/fuentes/articulos" aria-selected="${String(activa === "articulos")}">Artículos del resumen</a>
-  </div>`;
-}
-
 // Cómo está hoy cada fuente: se resume, es de consulta, está fuera, espera algo o falla.
 function situacionDeFuente(f, ajuste, falla, articulos) {
   if (f.estado === "fuera") {
@@ -673,10 +381,6 @@ function situacionDeFuente(f, ajuste, falla, articulos) {
 }
 
 async function vistaFuentes(subvista) {
-  if (subvista === "articulos") {
-    await vistaClasificacion();
-    return;
-  }
   if (subvista?.startsWith("tema/")) estadoFuentes.abiertos.add(subvista.slice(5)); // #/fuentes/tema/<tema>
   const [catalogo, agregadas, clasificacion, ajustes, { ultima, articulos }, consolidadas, marcas] = await Promise.all([
     leerJSON("catalogo/fuentes.json"),
@@ -784,7 +488,6 @@ async function vistaFuentes(subvista) {
       <h1>Fuentes</h1>
       <p class="meta">Cada página por su tema: por qué vale la pena, si se resume y qué tal está funcionando. El tema de la fuente es una guía; en el resumen, cada artículo va al tema de su contenido.</p>
     </header>
-    ${pestanasDeFuentes("fuentes")}
     <div class="chips" role="group" aria-label="Filtrar por estado">
       ${[["todas", "Todas"], ["resume", "Se resumen"], ["problema", "Con pendiente o falla"], ["consulta", "De consulta"], ["fuera", "Fuera"]]
         .map(([clave, nombre]) => html`<button class="chip" type="button" data-filtro-fuente="${clave}" aria-pressed="${String(estadoFuentes.filtro === clave)}">${nombre} <span>${cuenta(clave)}</span></button>`)}
@@ -820,111 +523,6 @@ async function vistaFuentes(subvista) {
     avisar(`${actual.nombre}: ${campo === "estado" ? ESTADOS[selector.value] : selector.value}`);
     dibujarLista();
   };
-  dibujarLista();
-}
-
-// ---------- Clasificación: qué hizo Claude con cada artículo ----------
-
-const estadoClasificacion = { recomendacion: "todas", categoria: "todas", buscar: "", visibles: 60 };
-
-async function vistaClasificacion() {
-  const resumen = await leerResumen();
-  if (!resumen) {
-    pintar(html`<section class="vacio"><p>Todavía no hay clasificación.</p>
-      <p class="meta">Aparece con el primer resumen de la mañana.</p></section>`);
-    return;
-  }
-  const lectura = await estadoDeLectura();
-  const detalle = resumen.clasificacion
-    ? new Map((await leerJSON(resumen.clasificacion)).articulos.map((a) => [a.archivo, a])) : new Map();
-  // A qué parte del resumen fue cada artículo.
-  const destino = new Map();
-  for (const c of resumen.categorias) {
-    // El formato 1 guardaba las citas como "citados"; el formato 2, como "articulos".
-    const usados = c.articulos ? c.articulos.map((a) => a.archivo) : c.citados || [];
-    for (const archivo of usados) destino.set(archivo, c.nombre);
-  }
-  for (const l of resumen.lecturas_del_dia) destino.set(l.archivo, destino.get(l.archivo) || "Lecturas del día");
-  if (resumen.aviso_noche_archivo) {
-    destino.set(resumen.aviso_noche_archivo, destino.get(resumen.aviso_noche_archivo) || "Para la noche");
-  }
-  const articulos = resumen.titulares.map((t) => ({ ...detalle.get(t.archivo), ...t, destino: destino.get(t.archivo) }));
-  const cuenta = (rec) => articulos.filter((a) => a.recomendacion === rec).length;
-  const categorias = CATEGORIAS.filter((c) => articulos.some((a) => a.categoria === c));
-
-  const fila = (a) => html`<li class="clasificado">
-    <a class="articulo-titulo" href="${enlaceLector(a)}">${marcaDeLeido(lectura, a.archivo)}${a.titulo}</a>
-    <span class="meta">${a.fuente} · ${a.minutos} min</span>
-    <span class="insignias">
-      <span class="insignia insignia-${a.recomendacion}">${RECOMENDACIONES[a.recomendacion]}</span>
-      <span class="insignia">${a.categoria}${a.sector ? ` · ${a.sector}` : ""}</span>
-      ${a.tipo ? html`<span class="insignia">${a.tipo}</span>` : ""}
-    </span>
-    ${a.novedad ? html`<span class="meta">Relevancia ${a.relevancia} · Novedad ${a.novedad} · Impacto ${a.impacto}</span>` : ""}
-    <span class="razon">${a.razon}</span>
-    <span class="${a.destino ? "destino" : "destino destino-fuera"}">${a.destino ? `→ En el resumen: ${a.destino}` : "No entró al texto del resumen"}</span>
-  </li>`;
-
-  const dibujarLista = () => {
-    const consulta = sinTildes(estadoClasificacion.buscar);
-    const elegidos = articulos.filter((a) =>
-      (estadoClasificacion.recomendacion === "todas" || a.recomendacion === estadoClasificacion.recomendacion)
-      && (estadoClasificacion.categoria === "todas" || a.categoria === estadoClasificacion.categoria)
-      && (!consulta || sinTildes(`${a.titulo} ${a.fuente} ${a.razon} ${a.subtema || ""}`).includes(consulta)))
-      .sort((a, b) => ORDEN_RECOMENDACION[a.recomendacion] - ORDEN_RECOMENDACION[b.recomendacion] || b.relevancia - a.relevancia);
-    const visibles = elegidos.slice(0, estadoClasificacion.visibles);
-    pintar(html`
-      <p class="meta">${numero(elegidos.length)} ${elegidos.length === 1 ? "artículo" : "artículos"}</p>
-      <ul class="lista-clasificacion">${visibles.map(fila)}</ul>
-      ${visibles.length < elegidos.length ? html`<button class="boton-texto" type="button" id="ver-mas">Ver ${Math.min(60, elegidos.length - visibles.length)} más</button>` : ""}
-    `, document.getElementById("lista-clasificacion"));
-    document.getElementById("ver-mas")?.addEventListener("click", () => {
-      estadoClasificacion.visibles += 60;
-      dibujarLista();
-    });
-  };
-
-  pintar(html`
-    <header class="encabezado-vista">
-      <p class="sobretitulo">Resumen del ${fechaLarga(resumen.fecha)}</p>
-      <h1>Fuentes</h1>
-      <p class="meta">Lo que Claude decidió con cada uno de los ${numero(articulos.length)} artículos revisados y a qué parte del resumen fue.</p>
-    </header>
-    ${pestanasDeFuentes("articulos")}
-    <div class="chips" role="group" aria-label="Filtrar por recomendación">
-      ${["todas", "leer", "resumen", "saltar"].map((rec) => html`<button class="chip" type="button" data-recomendacion="${rec}" aria-pressed="${String(estadoClasificacion.recomendacion === rec)}">${rec === "todas" ? "Todas" : RECOMENDACIONES[rec]} <span>${rec === "todas" ? articulos.length : cuenta(rec)}</span></button>`)}
-    </div>
-    <div class="filtros">
-      <label><span class="oculto">Categoría</span>
-        <select id="categoria">
-          <option value="todas">Todas las categorías</option>
-          ${categorias.map((c) => html`<option value="${c}" ${estadoClasificacion.categoria === c ? "selected" : ""}>${c}</option>`)}
-        </select>
-      </label>
-      <label class="buscador"><span class="oculto">Buscar</span>
-        <input id="buscar-clasificacion" type="search" placeholder="Buscar título, fuente o razón" autocomplete="off" value="${estadoClasificacion.buscar}">
-      </label>
-    </div>
-    <div id="lista-clasificacion"></div>
-  `);
-  contenido.onclick = (evento) => {
-    const chip = evento.target.closest("[data-recomendacion]");
-    if (!chip) return;
-    estadoClasificacion.recomendacion = chip.dataset.recomendacion;
-    estadoClasificacion.visibles = 60;
-    for (const otro of contenido.querySelectorAll("[data-recomendacion]")) otro.setAttribute("aria-pressed", String(otro === chip));
-    dibujarLista();
-  };
-  document.getElementById("categoria").addEventListener("change", (evento) => {
-    estadoClasificacion.categoria = evento.target.value;
-    estadoClasificacion.visibles = 60;
-    dibujarLista();
-  });
-  document.getElementById("buscar-clasificacion").addEventListener("input", (evento) => {
-    estadoClasificacion.buscar = evento.target.value.trim();
-    estadoClasificacion.visibles = 60;
-    dibujarLista();
-  });
   dibujarLista();
 }
 
@@ -2167,7 +1765,6 @@ async function vistaHoyV2() {
         ${inicio.relevante.length ? html`<ol class="relevante">${inicio.relevante.map((r) => html`<li>${noticia(r.detalle,
           masReciente(leidas.get(r.historia), visitas.get(r.detalle.hoja)), { titulo: r.texto, pagina: paginas[r.detalle.hoja] })}</li>`)}</ol>`
           : html`<p class="nota">Hoy no se escribió lo relevante. Las noticias están en Geografía, Áreas y Sectores.</p>`}
-        <p class="nota pie-hoy"><a href="#/anterior">Los resúmenes del formato anterior</a></p>
       </div>
       ${columnaProfundizar(inicio.profundizar, guardadas, nombres)}
     </div>
@@ -2287,10 +1884,8 @@ const VISTAS = {
   h: vistaHistoria,
   e: vistaEntidad,
   nuevo: vistaNuevo,
-  anterior: vistaHoy,
   leer: vistaLector,
   fuentes: vistaFuentes,
-  clasificacion: () => vistaFuentes("articulos"),
   "para-leer": vistaParaLeer,
   "para-ver": vistaParaVer,
   radar: vistaRadar,
@@ -2302,7 +1897,7 @@ const VISTAS = {
 // Las vistas que usan el ancho del computador; las demás quedan en una columna de lectura.
 const VISTAS_ANCHAS = new Set(["hoy", "geografia", "areas", "sectores", "p", "h", "e"]);
 // Qué sección de la barra se ilumina en las vistas que no tienen la suya.
-const NAVEGACION_DE = { leer: "hoy", anterior: "hoy", nuevo: "hoy", clasificacion: "fuentes", vocabulario: "cuaderno" };
+const NAVEGACION_DE = { leer: "hoy", nuevo: "hoy", vocabulario: "cuaderno" };
 
 const posiciones = {};
 let rutaActual = null;
