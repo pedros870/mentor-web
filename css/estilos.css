@@ -1053,3 +1053,21 @@ details.preguntar[open] > summary, details.seguir[open] > summary { margin-botto
 .tabla-cifras th, .tabla-cifras td { padding: 0.45rem 0.5rem; border-top: 1px solid var(--borde); text-align: right; font-variant-numeric: tabular-nums; }
 .tabla-cifras th[scope="row"], .tabla-cifras thead th:first-child { text-align: left; font-weight: 500; }
 .tabla-cifras thead th { color: var(--texto-suave); font-weight: 500; font-size: 0.8rem; border-top: 0; }
+
+/* ---------- La novedad como titular y Seguimiento ---------- */
+.noticia-antes { display: block; margin-top: 0.15rem; font-size: 0.88rem; color: var(--texto-suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.boton-seguir { margin-right: 0.6rem; }
+.seguidas { display: grid; gap: 0.25rem; }
+.seguida { padding: 1rem 0; border-top: 1px solid var(--borde); }
+.seguida.apagada { opacity: 0.5; }
+.seguida-titulo { display: block; font-family: var(--serif); font-size: 1.15rem; font-weight: 600; color: var(--texto); text-decoration: none; }
+.seguida-titulo:hover { color: var(--acento); }
+.linea-seguida { list-style: none; margin: 0.6rem 0 0.5rem; padding: 0 0 0 0.9rem; border-left: 2px solid var(--borde); }
+.linea-seguida li { display: grid; grid-template-columns: 4.5rem 1fr; gap: 0.6rem; padding: 0.3rem 0; font-size: 0.95rem; }
+.linea-seguida .fecha { color: var(--texto-suave); font-variant-numeric: tabular-nums; }
+.linea-seguida li.nuevo { margin-left: -0.9rem; padding-left: 0.75rem; border-left: 3px solid var(--acento); background: var(--acento-suave); border-radius: 0 8px 8px 0; }
+.filtros-area { margin-top: -0.4rem; }
+.indicadores { margin: 0.5rem 0 1.5rem; }
+.indicadores h2 { font-size: 1.05rem; margin-bottom: 0.3rem; }
+.indicadores .por-que-se-movio { display: block; font-size: 0.8rem; font-weight: 400; }
+.indicadores td a { color: var(--texto-suave); }

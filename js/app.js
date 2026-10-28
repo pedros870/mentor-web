@@ -1537,7 +1537,7 @@ async function vistaConectar() {
 
 const GRUPOS = { geografia: "Geografía", areas: "Áreas", sectores: "Sectores" };
 const VISTA_DE_GRUPO = { "Geografía": "geografia", "Áreas": "areas", "Sectores": "sectores" };
-const ESTADOS_HISTORIA = { nueva: "Nueva", actualizada: "Con novedades", aldia: "Al día" };
+const ESTADOS_HISTORIA = { nueva: "Nueva", actualizada: "Actualización", aldia: "Al día" };
 const TIPOS_DE_ENTIDAD = { persona: "Persona", lugar: "Lugar", organizacion: "Organización", empresa: "Empresa", otro: "Nombre" };
 
 const despues = (a, b) => !b || new Date(a) > new Date(b);
@@ -1566,6 +1566,113 @@ async function marcasV2() {
   return { visitas, leidas };
 }
 
+// ---------- Seguimiento: las historias que siguen vivas ----------
+// Lo que el organizador dejó cada noche (datos/v2/seguimiento.json), más los botones Seguir y
+// Soltar que Pedro tocó después.
+
+let seguidasIds = new Set();
+
+async function leerSeguimiento() {
+  const datos = await leerJSON("datos/v2/seguimiento.json").catch(() => ({ historias: {}, archivadas: {}, plazos: {} }));
+  const seguidas = new Map(Object.entries(datos.historias || {}));
+  const pendientes = new Map(); // las que siguió después de la última corrida
+  for (const m of await todasLasMarcas()) {
+    if (m.tipo !== "seguir" || !m.historia || m.ts <= (datos.generado || "")) continue;
+    if (m.valor === false) {
+      seguidas.delete(m.historia);
+      pendientes.delete(m.historia);
+    } else if (seguidas.has(m.historia)) {
+      seguidas.set(m.historia, { ...seguidas.get(m.historia), origen: "pedro" });
+    } else {
+      pendientes.set(m.historia, { origen: "pedro", desde: m.ts });
+    }
+  }
+  seguidasIds = new Set([...seguidas.keys(), ...pendientes.keys()]);
+  return { datos, seguidas, pendientes };
+}
+
+const botonSeguir = (id) => html`<button class="boton-secundario boton-seguir" type="button" data-seguir="${id}"
+  aria-pressed="${String(seguidasIds.has(id))}">${seguidasIds.has(id) ? "✓ La sigues" : "Seguir"}</button>`;
+
+// Seguir o soltar una historia, desde cualquier página.
+contenido.addEventListener("click", (evento) => {
+  const boton = evento.target.closest("[data-seguir]");
+  if (!boton) return;
+  const id = boton.dataset.seguir;
+  const valor = boton.getAttribute("aria-pressed") !== "true";
+  marcar({ tipo: "seguir", historia: id, valor });
+  if (valor) seguidasIds.add(id); else seguidasIds.delete(id);
+  for (const otro of contenido.querySelectorAll("[data-seguir]")) {
+    if (otro.dataset.seguir !== id) continue;
+    otro.setAttribute("aria-pressed", String(valor));
+    otro.textContent = valor ? "✓ La sigues" : otro.dataset.soltar ? "Seguirla de nuevo" : "Seguir";
+  }
+  boton.closest(".seguida")?.classList.toggle("apagada", !valor);
+  avisar(valor ? "Quedó en Seguimiento" : "Ya no la sigues");
+});
+
+// La línea de tiempo: cada novedad con su fecha y sus fuentes. Las historias anteriores al
+// seguimiento no la traen y sale de su creación y de lo nuevo que tuvieron.
+function movimientosDe(h) {
+  if (h.movimientos?.length) return h.movimientos;
+  const porDia = agrupar(h.piezas || [], (p) => (p.fecha || "").slice(0, 10));
+  const fuentesDe = (fecha) => [...new Set((porDia.get(fecha) || []).map((p) => p.fuente))].sort();
+  const creada = h.creada.slice(0, 10);
+  return [{ fecha: creada, momento: h.creada, titular: h.titulo, fuentes: fuentesDe(creada) },
+    ...h.actualizaciones.map((a) => ({ fecha: a.fecha, momento: a.momento, titular: a.textos[0] || h.titulo, fuentes: fuentesDe(a.fecha) }))];
+}
+
+function tarjetaSeguida(t, desde, paginas) {
+  const nuevos = t.movimientos.filter((m) => desde && despues(m.momento, desde)).length;
+  const origen = t.origen === "auto" ? `La sigue Mentor desde el ${fechaCorta(t.desde)}` : `La sigues desde el ${fechaCorta(t.desde)}`;
+  return html`<article class="seguida${nuevos ? " con-novedad" : ""}">
+    <a class="seguida-titulo" href="${enlaceHistoria(t.id)}">${t.titular || t.titulo}</a>
+    <span class="meta">${[paginas[t.hoja]?.nombre, fuentesTexto(t.fuentes), origen].filter(Boolean).join(" · ")}${
+      nuevos ? html` <span class="insignia insignia-actualizada">${nuevos === 1 ? "1 novedad" : `${nuevos} novedades`} desde tu visita</span>` : ""}</span>
+    <ol class="linea-seguida">${t.movimientos.map((m) => html`<li class="${desde && despues(m.momento, desde) ? "nuevo" : ""}">
+      <span class="fecha">${fechaCorta(m.fecha)}</span>
+      <span>${m.titular}${m.fuentes?.length ? html` <span class="meta">· ${m.fuentes.join(", ")}</span>` : ""}</span>
+    </li>`)}</ol>
+    ${t.pendiente ? html`<p class="meta">La línea de tiempo completa llega con la próxima recolección.</p>` : ""}
+    <div class="acciones-lectura"><button class="boton-secundario" type="button" data-seguir="${t.id}" data-soltar="1" aria-pressed="true">Soltar</button></div>
+  </article>`;
+}
+
+async function vistaSeguimiento() {
+  const [{ datos, seguidas, pendientes }, { visitas }, indice] = await Promise.all([
+    leerSeguimiento(), marcasV2(), leerJSON("datos/v2/indice.json")]);
+  const desde = visitas.get("seguimiento");
+  const paginas = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t]));
+  // Las que siguió después de la última corrida se buscan en su página.
+  const recientes = await Promise.all([...pendientes].map(async ([id, s]) => {
+    const pid = indice.historias[id];
+    const pagina = pid ? await leerJSON(`datos/v2/paginas/${pid}.json`).catch(() => null) : null;
+    const h = pagina && [...pagina.hoy, ...pagina.semana].find((x) => x.id === id);
+    return h && { ...h, ...s, id, fuentes: h.fuentes.length, movimientos: movimientosDe(h), pendiente: true };
+  }));
+  const tarjetas = [...seguidas.entries()].map(([id, t]) => ({ ...t, id }))
+    .concat(recientes.filter(Boolean))
+    .sort((a, b) => b.actualizada.localeCompare(a.actualizada));
+  const archivadas = Object.entries(datos.archivadas || {}).sort((a, b) => b[1].cerrada.localeCompare(a[1].cerrada));
+  const plazos = datos.plazos || {};
+  pintar(html`
+    <header class="encabezado-vista">
+      <p class="sobretitulo">Las historias que siguen vivas</p>
+      <h1>Seguimiento</h1>
+      <p class="meta">Cada historia con su línea de tiempo; lo nuevo desde tu última visita va resaltado. Mentor sigue solo las
+        ${plazos.primeras_de_hoy || 3} primeras de Hoy y las novedades muy importantes durante ${plazos.dias_automatico || 7} días.
+        Una historia seguida se archiva tras ${plazos.dias_cierre || 14} días sin novedad, y solo vuelve a Hoy con una novedad importante.</p>
+    </header>
+    ${tarjetas.length ? html`<div class="seguidas">${tarjetas.map((t) => tarjetaSeguida(t, desde, paginas))}</div>`
+      : html`<p class="nota">Todavía no sigues ninguna historia. Abre una noticia y toca "Seguir".</p>`}
+    ${archivadas.length ? html`<details class="mas"><summary>Archivadas (${archivadas.length})</summary>
+      <ul class="lista-compacta">${archivadas.map(([id, a]) => html`<li><a href="${enlaceHistoria(id)}">
+        <span class="articulo-titulo">${a.titulo}</span><span class="meta">Sin novedad desde el ${fechaCorta(a.cerrada)}</span></a></li>`)}</ul>
+    </details>` : ""}
+  `);
+  marcar({ tipo: "visita", pagina: "seguimiento" });
+}
+
 // Lo guardado desde "Para profundizar": lo que la biblioteca juntó cada noche, más las marcas recientes.
 async function piezasGuardadas() {
   const guardadas = new Map(Object.entries(await leerJSON("datos/biblioteca/guardadas.json").catch(() => ({}))));
@@ -1589,6 +1696,41 @@ function resaltar(vista) {
   }
 }
 
+// ---------- Los países: filtros por área e indicadores ----------
+
+const AREAS_DE_PAIS = ["Política y justicia", "Economía y negocios", "Seguridad y orden público",
+  "Sociedad: salud y educación", "Otras"];
+const MINIMO_PARA_AREAS = 10; // historias del país en la semana para que tenga sentido partirlas
+const areaDe = (h) => h.area || "Otras";
+// Los países con tabla de indicadores (scripts/indicadores.py).
+const INDICADORES_DE = { "pais-colombia": true, "pais-estados-unidos": true };
+
+// Separador de miles siempre (también en 3.148) y dos decimales; nunca "6,3B".
+function cifra(valor, unidad) {
+  const n = valor.toLocaleString("es-CO", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: "always" });
+  return unidad === "%" ? `${n} %` : unidad ? `${n} ${unidad}` : n;
+}
+
+function tablaIndicadores(pais, visita, historias) {
+  if (!pais?.indicadores?.length) return "";
+  return html`<section class="indicadores">
+    <h2>Indicadores</h2>
+    <div class="tabla"><table class="tabla-cifras">
+      <thead><tr><th scope="col">Indicador</th><th scope="col">Último</th><th scope="col">Anterior</th>
+        <th scope="col">Fecha del dato</th><th scope="col">Fuente</th></tr></thead>
+      <tbody>${pais.indicadores.map((i) => html`<tr>
+        <th scope="row">${i.nombre}${visita && i.cambio_detectado && despues(i.cambio_detectado, visita)
+          ? html` <span class="insignia insignia-actualizada">Cambió</span>` : ""}${i.historia && historias.has(i.historia)
+          ? html`<a class="por-que-se-movio" href="${enlaceHistoria(i.historia)}">Por qué se movió →</a>` : ""}</th>
+        <td>${cifra(i.valor, i.unidad)}</td>
+        <td>${i.anterior === null ? "—" : cifra(i.anterior, i.unidad)}</td>
+        <td>${i.periodo || fechaCorta(i.fecha)}</td>
+        <td><a href="${i.enlace}" target="_blank" rel="noopener noreferrer">${i.fuente}</a></td>
+      </tr>`)}</tbody></table></div>
+    ${pais.fuera?.length ? html`<p class="meta">Sin fuente oficial gratuita, por ahora fuera: ${pais.fuera.map((f) => f.nombre).join(", ")}.</p>` : ""}
+  </section>`;
+}
+
 // ---------- Geografía, Áreas y Sectores: subpestañas en el formato de Hoy ----------
 // Cada subpestaña (una región, un área o un sector) abre como Hoy: lo relevante numerado, que no
 // repite lo de Hoy, el resto de las noticias del día y para profundizar. Lo que ya está en Hoy y
@@ -1596,16 +1738,21 @@ function resaltar(vista) {
 
 async function vistaPestanas(clave, ruta) {
   const grupo = GRUPOS[clave];
-  const [slugPestana, filtro] = (ruta || "").split("/");
+  const [slugPestana, filtro, filtroArea] = (ruta || "").split("/");
   const indice = await leerJSON("datos/v2/indice.json");
   const pestanas = indice.pestanas.filter((p) => p.grupo === grupo);
   const elegida = pestanas.find((p) => p.slug === slugPestana) || pestanas[0];
-  const [pestana, { visitas, leidas }, guardadas] = await Promise.all([
-    leerJSON(`datos/v2/pestanas/${elegida.pestana}.json`), marcasV2(), piezasGuardadas(), cargarHilosPorHistoria()]);
+  const [pestana, { visitas, leidas }, guardadas, , , indicadores] = await Promise.all([
+    leerJSON(`datos/v2/pestanas/${elegida.pestana}.json`), marcasV2(), piezasGuardadas(), cargarHilosPorHistoria(), leerSeguimiento(),
+    INDICADORES_DE[filtro] ? leerJSON("datos/indicadores/indicadores.json").catch(() => null) : null]);
   const paginas = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t]));
   const varias = pestana.hojas.length > 1;
   const hoja = varias && pestana.hojas.includes(filtro) ? filtro : null;
-  const deLaHoja = (x) => !hoja || x.hoja === hoja;
+  // Dentro de un país, filtros por área, solo si tiene suficientes historias en la semana.
+  const delPais = hoja?.startsWith("pais-") ? [...pestana.hoy, ...pestana.semana].filter((h) => h.hoja === hoja) : [];
+  const conAreas = delPais.length >= MINIMO_PARA_AREAS && new Set(delPais.map(areaDe)).size > 1;
+  const area = conAreas ? AREAS_DE_PAIS.find((a) => slugV2(a) === filtroArea) : null;
+  const deLaHoja = (x) => (!hoja || x.hoja === hoja) && (!area || areaDe(x) === area);
 
   const visita = masReciente(visitas.get(pestana.pestana), hoja && visitas.get(hoja));
   const visto = (h) => masReciente(leidas.get(h.id), visita);
@@ -1646,6 +1793,12 @@ async function vistaPestanas(clave, ruta) {
           ${pestana.hojas.map((pid) => html`<a class="chip${paginas[pid].hoy ? "" : " sin-hoy"}" href="${base}/${pid}"
             aria-current="${pid === hoja ? "page" : "false"}">${paginas[pid].filtro || paginas[pid].nombre}${paginas[pid].hoy ? html`<span>${paginas[pid].hoy}</span>` : ""}</a>`)}
         </div>` : ""}
+        ${conAreas ? html`<div class="filtros-pestana filtros-area" aria-label="Áreas de ${paginas[hoja].nombre}">
+          <a class="chip" href="${base}/${hoja}" aria-current="${area ? "false" : "page"}">Todas</a>
+          ${AREAS_DE_PAIS.map((a) => [a, delPais.filter((h) => areaDe(h) === a).length]).filter(([, n]) => n).map(([a, n]) => html`<a
+            class="chip" href="${base}/${hoja}/${slugV2(a)}" aria-current="${a === area ? "page" : "false"}">${a}<span>${n}</span></a>`)}
+        </div>` : ""}
+        ${hoja && INDICADORES_DE[hoja] ? tablaIndicadores(indicadores?.paises?.[hoja], visitas.get(hoja), porId) : ""}
         ${relevante.length ? html`<ol class="relevante">${relevante.map((r) => html`<li>${noticia(r.h, visto(r.h),
           { titulo: r.texto, pagina: pagina(r.h), marca: marca(r.h) })}</li>`)}</ol>`
           : html`<p class="nota">${hoy.some((h) => enHoy.has(h.id)) ? "Lo más importante de aquí ya está en Hoy."
@@ -1692,18 +1845,20 @@ function cuerpoNoticia(h, visto, pagina) {
     <ul class="fuentes-noticia">${piezas.map((p) => html`<li><a href="${enlaceLector(p)}">${p.titulo}</a>
       <span class="meta">${p.fuente}${p.minutos ? ` · ${p.minutos} min` : ""}</span></li>`)}</ul>
     ${preguntarSobre(h)}
-    <p class="enlaces-noticia"><a href="${enlaceHistoria(h.id)}">Línea de tiempo, personas y conexiones →</a>${
+    <p class="enlaces-noticia">${botonSeguir(h.id)} <a href="${enlaceHistoria(h.id)}">Línea de tiempo, personas y conexiones →</a>${
       pagina ? html` <a href="${enlacePagina(pagina.pagina)}">Más de ${pagina.nombre} →</a>` : ""}</p>
   </div>`;
 }
 
-// Con marca ("En Hoy", "Ya la leíste"), la noticia sale apagada y señalada.
+// Con marca ("En Hoy", "Ya la leíste"), la noticia sale apagada y señalada. El titular es el de
+// la historia en todas las páginas: si tuvo una novedad, es lo nuevo, y debajo va lo de antes.
 function noticia(h, visto, { titulo, pagina, conFecha, marca } = {}) {
   const estado = visto ? estadoDeHistoria(h, visto) : null;
   const meta = [fuentesTexto(h.fuentes.length), pagina?.nombre, conFecha ? fechaCorta(h.actualizada) : ""].filter(Boolean).join(" · ");
   return html`<details class="noticia${marca ? " apagada" : ""}" data-historia="${h.id}">
     <summary>
-      <span class="noticia-titulo">${titulo || h.titulo}</span>
+      <span class="noticia-titulo">${h.titular || titulo || h.titulo}</span>
+      ${h.antes ? html`<span class="noticia-antes">Antes: ${h.antes}</span>` : ""}
       <span class="noticia-meta">${marca ? html`<span class="insignia insignia-vista">${marca}</span>`
         : estado && estado !== "aldia" ? html`<span class="insignia insignia-${estado}">${ESTADOS_HISTORIA[estado]}</span>` : ""}${meta}</span>
     </summary>
@@ -1752,7 +1907,8 @@ function escucharNoticias(profundizar, guardadas) {
 
 async function vistaHoyV2() {
   const [inicio, indice, { visitas, leidas }, guardadas] = await Promise.all([
-    leerJSON("datos/v2/inicio.json"), leerJSON("datos/v2/indice.json"), marcasV2(), piezasGuardadas(), cargarHilosPorHistoria()]);
+    leerJSON("datos/v2/inicio.json"), leerJSON("datos/v2/indice.json"), marcasV2(), piezasGuardadas(), cargarHilosPorHistoria(),
+    leerSeguimiento()]);
   const paginas = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t]));
   const nombres = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t.nombre]));
   pintar(html`
@@ -1794,7 +1950,7 @@ async function vistaHistoria(id) {
   if (!pid) throw new Error("No se encontró esa historia.");
   resaltar(VISTA_DE_GRUPO[indice.paginas.find((t) => t.pagina === pid)?.grupo]);
   const [pagina, { visitas, leidas }] = await Promise.all([leerJSON(`datos/v2/paginas/${pid}.json`), marcasV2(),
-    cargarHilosPorHistoria()]);
+    cargarHilosPorHistoria(), leerSeguimiento()]);
   const h = [...pagina.hoy, ...pagina.semana].find((x) => x.id === id)
     || (await leerJSON("datos/v2/historias.json")).historias[id];
   const visto = masReciente(leidas.get(id), visitas.get(pid));
@@ -1806,8 +1962,10 @@ async function vistaHistoria(id) {
       <div class="principal">
         <a class="volver" href="${enlacePagina(pid)}">← ${pagina.nombre}</a>
         <header>
-          <h1>${h.titulo}</h1>
+          <h1>${h.titular || h.titulo}</h1>
+          ${h.antes ? html`<p class="noticia-antes">Antes: ${h.antes}</p>` : ""}
           <p class="meta">${h.estado === "activa" ? "Activa" : "Cerrada"} desde el ${fechaCorta(h.creada)} · ${fuentesTexto(h.fuentes.length)} · última novedad: ${fechaLarga(h.actualizada, true)}</p>
+          ${h.estado === "activa" ? botonSeguir(h.id) : ""}
         </header>
         ${nuevas.length ? html`<section class="nuevo-desde destacado">
           <p class="grupo">Nuevo desde que la leíste (${fechaLarga(visto, true)})</p>
@@ -1890,6 +2048,7 @@ const VISTAS = {
   "para-ver": vistaParaVer,
   radar: vistaRadar,
   cuaderno: vistaCuaderno,
+  seguimiento: vistaSeguimiento,
   vocabulario: vistaCuaderno,
   estado: vistaEstado,
   conectar: vistaConectar,
