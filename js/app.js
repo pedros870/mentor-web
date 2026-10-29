@@ -141,6 +141,32 @@ async function leerResumen() {
   }
 }
 
+// Qué clase de pieza es (scripts/organizar.py); las noticias no llevan etiqueta.
+const TIPOS_DE_PIEZA = { "investigación": "Investigación", "análisis": "Análisis", "opinión": "Opinión", informe: "Informe", mercado: "Mercado" };
+
+// El organizador guarda, por día, el tipo de las piezas que no son noticias.
+function tiposDelDia(ruta) {
+  const dia = ruta.match(/^datos\/crudo\/(\d{4}\/\d{2}\/\d{2})\//)?.[1];
+  return dia ? leerJSON(`datos/v2/tipos/${dia}.json`).catch(() => ({})) : Promise.resolve({});
+}
+
+// Quién está detrás de cada fuente: dueño, de qué vive y su línea (catalogo/fichas_fuentes.json).
+function fichasDeFuentes() {
+  return leerJSON("catalogo/fichas_fuentes.json").then((d) => d.fuentes).catch(() => ({}));
+}
+
+function quienEstaDetras(f, nombre) {
+  if (!f) return "";
+  const filas = [["Qué es", f.clase], ["Dueño", f.dueno], ["De qué vive", f.financiacion], ["Línea editorial", f.linea]]
+    .filter(([, v]) => v);
+  return html`<details class="quien-detras"><summary>Quién está detrás de ${nombre}</summary>
+    ${f.tener_en_cuenta ? html`<p class="tener-en-cuenta">${f.tener_en_cuenta}</p>` : ""}
+    <dl>${filas.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}</dl>
+    <p class="meta">Ficha de Claude${f.confianza === "baja" ? ", con datos por confirmar" : ""}${f.enlaces?.length
+      ? html`: ${f.enlaces.map((u, i) => html`${i ? " · " : ""}<a href="${u}" target="_blank" rel="noopener noreferrer">${dominio(u)}</a>`)}` : ""}</p>
+  </details>`;
+}
+
 // Lo que Pedro ha marcado, reducido a su estado actual: la última marca manda.
 async function estadoDeLectura() {
   const leidos = new Set();
@@ -283,8 +309,9 @@ async function vistaLector(ruta) {
     .replace(/^\s*# .*\n/, "") // el título ya va en la cabecera
     .replace(/\n---\n\nSolo se obtuvo el extracto[\s\S]*$/, "");
   const extracto = ficha.extraccion === "extracto";
-  const [resumen, lectura, cuadernoLector, avancesGuardados] = await Promise.all([leerResumen().catch(() => null), estadoDeLectura(),
-    leerCuaderno().catch(() => []), avances()]);
+  const [resumen, lectura, cuadernoLector, avancesGuardados, tipos, fichas] = await Promise.all([leerResumen().catch(() => null),
+    estadoDeLectura(), leerCuaderno().catch(() => []), avances(), tiposDelDia(ruta), fichasDeFuentes()]);
+  const tipo = TIPOS_DE_PIEZA[tipos[ruta]];
   const hilosDeLaPieza = hilosDe(cuadernoLector).filter((x) => x[0].archivo === ruta && x[0].clase !== "palabra" && !x[0].archivada);
   const clasificacion = resumen?.titulares.find((t) => t.archivo === ruta);
   // Lo que el sistema recomendó leer completo (y lo de Para leer) se califica con
@@ -301,8 +328,9 @@ async function vistaLector(ruta) {
       <header>
         <p class="sobretitulo">${ficha.fuente}${ficha.categoria_inicial ? ` · ${ficha.categoria_inicial}` : ""}</p>
         <h1>${ficha.titulo}</h1>
-        <p class="meta">${[ficha.autor, fechaLarga(ficha.fecha_publicacion, true), `${ficha.minutos_lectura} min de lectura`]
-          .filter(Boolean).join(" · ")}</p>
+        <p class="meta">${tipo ? html`<span class="insignia insignia-tipo">${tipo}</span> ` : ""}${[ficha.autor,
+          fechaLarga(ficha.fecha_publicacion, true), `${ficha.minutos_lectura} min de lectura`].filter(Boolean).join(" · ")}</p>
+        ${quienEstaDetras(fichas[ficha.fuente_id], ficha.fuente)}
         ${clasificacion ? html`<p class="razon-claude"><span class="insignia insignia-${clasificacion.recomendacion}">${RECOMENDACIONES[clasificacion.recomendacion]}</span> ${clasificacion.razon}</p>` : ""}
         ${extracto ? html`<p class="aviso">Solo se obtuvo el extracto (${MOTIVOS_DE_EXTRACTO[ficha.motivo_extracto] || ficha.motivo_extracto}). El texto completo está en el original.</p>` : ""}
       </header>
@@ -316,6 +344,7 @@ async function vistaLector(ruta) {
         <label class="nota-lector">¿Qué te dejó o qué te cambió? <span class="meta">(opcional)</span>
           <textarea id="nota" rows="3">${lectura.notas.get(ruta) || ""}</textarea>
         </label>
+        <label class="discutir"><input type="checkbox" id="discutir"> Quiero discutirlo con Claude <span class="meta">(queda en el Cuaderno)</span></label>
         <button class="boton" type="button" id="guardar-nota">Guardar nota</button>
       </section>
       <section class="preguntas-lector">
@@ -354,10 +383,20 @@ async function vistaLector(ruta) {
       avisar(`Calificado: ${boton.textContent.toLowerCase()}`);
     });
   }
+  // La misma nota no se guarda dos veces; si pide discutirla, también queda como pregunta en el Cuaderno.
+  let notaGuardada = lectura.notas.get(ruta) || "";
   document.getElementById("guardar-nota").addEventListener("click", () => {
     const texto = document.getElementById("nota").value.trim();
-    marcar({ tipo: "nota", archivo: ruta, texto });
-    avisar(texto ? "Nota guardada" : "Nota borrada");
+    const discutir = document.getElementById("discutir");
+    if (texto !== notaGuardada) marcar({ tipo: "nota", archivo: ruta, texto });
+    if (discutir.checked && texto) {
+      marcar({ tipo: "cuaderno", clase: "pregunta", texto, archivo: ruta, titulo: ficha.titulo, desde: "nota" });
+      discutir.checked = false;
+      avisar("Nota guardada. Quedó en el Cuaderno para discutirla");
+    } else {
+      avisar(texto === notaGuardada ? "La nota ya estaba guardada" : texto ? "Nota guardada" : "Nota borrada");
+    }
+    notaGuardada = texto;
   });
 }
 
@@ -391,6 +430,7 @@ async function vistaFuentes(subvista) {
     leerJSON("catalogo/reclasificaciones.json").catch(() => ({ fuentes: {} })),
     todasLasMarcas(),
   ]);
+  const quien = await fichasDeFuentes();
   const fuentes = [...catalogo.fuentes, ...agregadas.fuentes];
   const fallas = new Map((await leerJSON(ultima.fallas)).corridas.at(-1).fallas.map((f) => [f.fuente_id, f]));
   const porFuente = new Map();
@@ -444,6 +484,7 @@ async function vistaFuentes(subvista) {
     <a class="articulo-titulo" href="${f.enlace}" target="_blank" rel="noopener noreferrer">${f.nombre} ↗</a>
     ${f.autor_o_responsable && f.autor_o_responsable !== f.nombre ? html`<span class="meta">${f.autor_o_responsable}</span>` : ""}
     ${f.que_es ? html`<p class="por-que">${f.que_es}</p>` : ""}
+    ${quienEstaDetras(quien[f.id], f.nombre)}
     ${f.nota_de_pedro ? html`<p class="nota-pedro"><strong>Tu nota:</strong> ${f.nota_de_pedro}</p>` : ""}
     <span class="estado-fuente estado-${f.situacion.clase}">${f.situacion.texto}</span>
     <div class="reclasificar">
@@ -1975,6 +2016,7 @@ async function vistaHistoria(id) {
           <div class="cuerpo">${seguro(markdownAHtml(h.sintesis))}</div>
           ${h.lectura_claude ? html`<p class="lectura-claude"><em>Lectura de Claude: ${h.lectura_claude}</em></p>` : ""}
         </section>
+        ${h.contraste ? html`<section class="contraste"><h2>En qué no coinciden las fuentes</h2><p>${h.contraste}</p></section>` : ""}
         ${h.que_sigue.length ? html`<section><h2>Qué sigue</h2>
           <ul class="que-sigue">${h.que_sigue.map((q) => html`<li><strong>${q.cuando}:</strong> ${q.que}</li>`)}</ul></section>` : ""}
         <section class="preguntas-historia"><h2>Pregúntale a Claude</h2>${preguntarSobre(h)}</section>
@@ -1982,7 +2024,7 @@ async function vistaHistoria(id) {
           <ul class="lista-compacta">${piezas.map((p) => html`<li><a href="${enlaceLector(p)}">
             <span class="insignia insignia-${p.recomendacion}">${RECOMENDACIONES[p.recomendacion]}</span>
             <span class="articulo-titulo">${p.titulo}</span>
-            <span class="meta">${p.fuente} · ${fechaCorta(p.fecha)}${p.minutos ? ` · ${p.minutos} min` : ""}</span></a></li>`)}</ul>
+            <span class="meta">${p.fuente}${TIPOS_DE_PIEZA[p.tipo] ? ` · ${TIPOS_DE_PIEZA[p.tipo]}` : ""} · ${fechaCorta(p.fecha)}${p.minutos ? ` · ${p.minutos} min` : ""}</span></a></li>`)}</ul>
         </section>
       </div>
       <aside class="lateral">

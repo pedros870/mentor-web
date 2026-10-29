@@ -1071,3 +1071,21 @@ details.preguntar[open] > summary, details.seguir[open] > summary { margin-botto
 .indicadores h2 { font-size: 1.05rem; margin-bottom: 0.3rem; }
 .indicadores .por-que-se-movio { display: block; font-size: 0.8rem; font-weight: 400; }
 .indicadores td a { color: var(--texto-suave); }
+
+/* ---------- Leer con ojo crítico ---------- */
+.insignia-tipo { margin-left: 0; margin-right: 0.3rem; background: var(--acento-suave); border-color: transparent; color: var(--acento); }
+.quien-detras { margin: 0.6rem 0 0; font-size: 0.9rem; }
+.quien-detras > summary { cursor: pointer; color: var(--acento); }
+.quien-detras dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; margin: 0.5rem 0; }
+.quien-detras dt { color: var(--texto-suave); }
+.quien-detras dd { margin: 0; }
+.tener-en-cuenta { margin: 0.5rem 0 0; padding-left: 0.75rem; border-left: 3px solid var(--acento); }
+.fuente .quien-detras { margin: 0.2rem 0 0.4rem; }
+.contraste { margin-top: 1.25rem; padding: 0.75rem 1rem; border-left: 3px solid var(--acento); background: var(--acento-suave); border-radius: 0 8px 8px 0; }
+.contraste h2 { font-size: 1rem; margin: 0 0 0.3rem; }
+.contraste p { margin: 0; }
+.discutir { display: flex; align-items: center; gap: 0.4rem; margin: 0 0 0.75rem; font-size: 0.9rem; }
+@media (max-width: 40rem) {
+  .quien-detras dl { grid-template-columns: 1fr; }
+  .quien-detras dd { margin-bottom: 0.3rem; }
+}
