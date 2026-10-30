@@ -1702,7 +1702,8 @@ async function vistaSeguimiento() {
       <h1>Seguimiento</h1>
       <p class="meta">Cada historia con su línea de tiempo; lo nuevo desde tu última visita va resaltado. Mentor sigue solo las
         ${plazos.primeras_de_hoy || 3} primeras de Hoy y las novedades muy importantes durante ${plazos.dias_automatico || 7} días.
-        Una historia seguida se archiva tras ${plazos.dias_cierre || 14} días sin novedad, y solo vuelve a Hoy con una novedad importante.</p>
+        Una historia seguida se archiva tras ${plazos.dias_cierre || 14} días sin novedad${(plazos.importancia_para_volver || 1) > 1
+          ? ", y solo vuelve a Hoy con una novedad importante." : ". Cuando tiene una novedad, puede quedar en Hoy como cualquier otra."}</p>
     </header>
     ${tarjetas.length ? html`<div class="seguidas">${tarjetas.map((t) => tarjetaSeguida(t, desde, paginas))}</div>`
       : html`<p class="nota">Todavía no sigues ninguna historia. Abre una noticia y toca "Seguir".</p>`}
