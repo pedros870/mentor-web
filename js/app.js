@@ -1,8 +1,11 @@
 // Mentor: la interfaz de lectura. Una sola página con vistas por dirección
-// (#/hoy, #/geografia, #/areas, #/sectores, #/p/…, #/h/…, #/leer/…, #/para-leer, #/cuaderno, #/estado…).
+// (#/hoy, #/geografia, #/areas, #/sectores, #/p/…, #/h/…, #/leer/…, #/para-leer, #/cuaderno, #/repaso, #/estado…).
+import { buscar, impulsoDeHistoria, normalizar } from "./buscador.js";
 import { ErrorDeDatos, REPO_POR_DEFECTO, borrarConfig, config, guardarConfig, leerJSON, leerTexto, modoLocal } from "./datos.js";
 import { enLinea, escapar, markdownAHtml, separarFicha } from "./markdown.js";
 import { alCambiar, enviar, estadoDeEnvio, marcar, todasLasMarcas } from "./marcas.js";
+import { INTERVALOS, dondeEsta, estadoDePalabras, fraseDelDia, preguntasDeHistorias, siguienteCaja } from "./repaso.js";
+import { escuchar, partir, pausarOSeguir, puedeHablar } from "./voz.js";
 
 const contenido = document.getElementById("contenido");
 
@@ -105,6 +108,17 @@ function agrupar(lista, clave) {
   }
   return grupos;
 }
+
+const diaEnBogota = (iso) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota" }).format(new Date(iso));
+const diaDeHoy = () => diaEnBogota(new Date().toISOString());
+const recortar = (texto, largo) => (texto.length > largo ? `${texto.slice(0, largo).replace(/\s+\S*$/, "")}…` : texto);
+
+// Lo que cada vista deja listo para el resto de la página: qué se escucha con "Escuchar" (o la
+// tecla e), las historias que tiene a la vista y las teclas propias de la vista. Se limpian al
+// cambiar de vista.
+let paraEscuchar = null;
+let teclasDeLaVista = null;
+const historiasEnVista = new Map();
 
 async function ultimaRecoleccion() {
   const ultima = await leerJSON("datos/indice/ultima.json");
@@ -220,7 +234,7 @@ async function avances() {
   };
   for (const m of await todasLasMarcas()) {
     if (!m.archivo) continue;
-    if (m.tipo === "progreso") poner(m.archivo, { parrafo: m.parrafo, total: m.total, fecha: m.ts });
+    if (m.tipo === "progreso") poner(m.archivo, { parrafo: m.parrafo, total: m.total, fecha: m.ts, titulo: m.titulo });
     else if (["leido", "calificacion"].includes(m.tipo) && m.valor !== false) poner(m.archivo, { borrado: true, fecha: m.ts });
   }
   for (const [archivo, a] of Object.entries(avancesLocales())) poner(archivo, a);
@@ -230,8 +244,9 @@ async function avances() {
 const porcentaje = (a) => Math.min(99, Math.round((100 * (a.parrafo + 1)) / (a.total || 1)));
 
 // En el lector: una barra con lo leído, el botón para seguir donde quedó y, al salir
-// (o cada tres minutos), una marca con el párrafo que tenía a la vista.
-function seguirAvance(ruta, avance, leido) {
+// (o cada tres minutos), una marca con el párrafo que tenía a la vista y el título, para
+// ofrecer en Hoy seguir donde quedó.
+function seguirAvance(ruta, avance, leido, titulo) {
   const bloques = [...contenido.querySelectorAll(".lector .cuerpo > *")];
   const ir = (i) => {
     if (!bloques[i]) return;
@@ -278,11 +293,11 @@ function seguirAvance(ruta, avance, leido) {
   const guardar = () => {
     if (actual < 2 || actual === enviado) return;
     enviado = actual;
-    const a = { parrafo: actual, total: bloques.length, fecha: new Date().toISOString() };
+    const a = { parrafo: actual, total: bloques.length, fecha: new Date().toISOString(), titulo };
     try {
       localStorage.setItem(CLAVE_AVANCE, JSON.stringify({ ...avancesLocales(), [ruta]: a }));
     } catch { /* sin almacenamiento: queda la marca */ }
-    marcar({ tipo: "progreso", archivo: ruta, parrafo: actual, total: bloques.length });
+    marcar({ tipo: "progreso", archivo: ruta, parrafo: actual, total: bloques.length, titulo });
   };
   let cuadro = null;
   const alDesplazar = () => {
@@ -330,6 +345,7 @@ async function vistaLector(ruta) {
         <h1>${ficha.titulo}</h1>
         <p class="meta">${tipo ? html`<span class="insignia insignia-tipo">${tipo}</span> ` : ""}${[ficha.autor,
           fechaLarga(ficha.fecha_publicacion, true), `${ficha.minutos_lectura} min de lectura`].filter(Boolean).join(" · ")}</p>
+        ${botonEscuchar("Escuchar desde aquí")}
         ${quienEstaDetras(fichas[ficha.fuente_id], ficha.fuente)}
         ${clasificacion ? html`<p class="razon-claude"><span class="insignia insignia-${clasificacion.recomendacion}">${RECOMENDACIONES[clasificacion.recomendacion]}</span> ${clasificacion.razon}</p>` : ""}
         ${extracto ? html`<p class="aviso">Solo se obtuvo el extracto (${MOTIVOS_DE_EXTRACTO[ficha.motivo_extracto] || ficha.motivo_extracto}). El texto completo está en el original.</p>` : ""}
@@ -363,7 +379,19 @@ async function vistaLector(ruta) {
     </article>
   `);
 
-  seguirAvance(ruta, avancesGuardados.get(ruta), leido);
+  seguirAvance(ruta, avancesGuardados.get(ruta), leido, ficha.titulo);
+  // Escuchar empieza en el párrafo que está arriba en la pantalla, o en el título si no ha bajado.
+  paraEscuchar = () => {
+    const bloques = [...contenido.querySelectorAll(".lector .cuerpo > *")];
+    const tope = (document.querySelector(".cabecera")?.getBoundingClientRect().bottom || 0) + 8;
+    const visible = bloques.findIndex((b) => b.getBoundingClientRect().bottom > tope);
+    const cola = bloques.map((b, i) => ({ clave: String(i), titulo: ficha.titulo, partes: partir(b.textContent) }))
+      .filter((item) => item.partes.length);
+    const desde = Math.max(0, cola.findIndex((item) => Number(item.clave) >= visible));
+    if (visible <= 0) cola.unshift({ clave: "titulo", titulo: ficha.titulo, partes: partir(`${ficha.titulo}.`) });
+    escucharCola(cola, { titulo: "Lectura", desde: visible <= 0 ? 0 : desde,
+      alEmpezar: (item) => resaltarSonando(item && (item.clave === "titulo" ? ".lector h1" : `.lector .cuerpo > :nth-child(${Number(item.clave) + 1})`)) });
+  };
   const botonLeido = document.getElementById("leido");
   const marcarLeido = (valor) => {
     botonLeido.setAttribute("aria-pressed", String(valor));
@@ -1163,8 +1191,8 @@ async function vistaCuaderno() {
     ${lista.length ? lista.map((x) => hilo(x, { desde })) : html`<p class="nota">${vacio}</p>`}
   </section>`;
   pintar(html`
+    ${pestanasDeCuaderno("cuaderno")}
     <header class="encabezado-vista">
-      <p class="sobretitulo">Lo que conversamos</p>
       <h1>Cuaderno</h1>
       <p class="meta">Lo que dejes aquí, en una noticia o en el lector, lo responde Claude en la próxima sesión de Claude Code
         (escribe <strong>/cuaderno</strong>). No gasta API y todo queda guardado.</p>
@@ -1184,6 +1212,175 @@ async function vistaCuaderno() {
       ${archivados.map((x) => hilo(x))}</details>` : ""}
   `);
   marcar({ tipo: "visita", pagina: "cuaderno" });
+}
+
+const SUBPESTANAS_CUADERNO = [{ vista: "cuaderno", nombre: "Conversaciones" }, { vista: "repaso", nombre: "Repaso" }];
+
+function pestanasDeCuaderno(activa) {
+  return html`<div class="encabezado-pestanas">
+    <p class="sobretitulo">Lo que conversamos y lo que aprendes</p>
+    <nav class="pestanas" aria-label="Cuaderno">${SUBPESTANAS_CUADERNO.map((s) => html`<a href="#/${s.vista}"
+      aria-current="${s.vista === activa ? "page" : "false"}">${s.nombre}</a>`)}</nav>
+  </div>`;
+}
+
+// ---------- Repaso: el tutor ----------
+// Preguntas sobre lo que Pedro leyó en la semana (el titular de una historia con un nombre
+// tapado), su vocabulario con repeticiones espaciadas y una de sus frases. Lo arma la página con
+// lo que ya está guardado; cada respuesta queda como marca, para que el repaso se espacie.
+
+const QUE_FALTA = { persona: "Quién falta", organizacion: "Qué organización falta", empresa: "Qué empresa falta", lugar: "Qué lugar falta" };
+
+async function vistaRepaso() {
+  const [buscador, indice, entradas, marcas, { leidas }] = await Promise.all([indiceDelBuscador(), leerJSON("datos/v2/indice.json"),
+    leerCuaderno().catch(() => []), todasLasMarcas(), marcasV2()]);
+  const repasos = marcas.filter((m) => m.tipo === "repaso");
+  const preguntas = buscador ? preguntasDeHistorias({ indice: buscador, leidas, fusionadas: indice.fusionadas,
+    repasos: repasos.filter((r) => r.clase === "historia") }) : [];
+  const nombres = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t.nombre]));
+  const palabras = estadoDePalabras(entradas.filter((e) => e.clase === "palabra" && !e.archivada && e.respuestas.length),
+    repasos.filter((r) => r.clase === "palabra"));
+  const tocan = palabras.filter((p) => p.toca).sort((a, b) => a.vuelve - b.vuelve);
+  const proximas = palabras.filter((p) => !p.toca).map((p) => p.vuelve); // y las que se repasen ahora
+  const frases = hilosDe(entradas).filter((x) => x[0].clase === "frase" && !x[0].archivada);
+  const [frase, ...siguientes] = fraseDelDia(frases, diaDeHoy()) || [];
+  pintar(html`
+    ${pestanasDeCuaderno("repaso")}
+    <header class="encabezado-vista">
+      <h1>Repaso</h1>
+      <p class="meta">Recordar con esfuerzo es lo que fija lo leído. Son un par de minutos: lo que falles vuelve al día
+        siguiente y lo que aciertes se espacia. Todo sale de lo que leíste y guardaste, sin gastar API.</p>
+    </header>
+    <section class="seccion-repaso">
+      <h2>Lo que leíste esta semana <span class="cuenta">${preguntas.length}</span></h2>
+      <div id="preguntas"></div>
+    </section>
+    <section class="seccion-repaso">
+      <h2>Vocabulario <span class="cuenta">${tocan.length ? `${tocan.length} para hoy` : palabras.length}</span></h2>
+      <div id="palabras"></div>
+    </section>
+    ${frase ? html`<section class="seccion-repaso frases">
+      <h2>Una de tus frases</h2>
+      <article class="frase">
+        <blockquote>${frase.texto}</blockquote>
+        <p class="meta">${frase.archivo ? html`<a href="${enlaceLector(frase)}" data-ir-a="${frase.archivo}" data-parrafo="${frase.parrafo ?? ""}">${frase.titulo || "La lectura"}</a> · ` : ""}${fechaLarga(frase.ts)}</p>
+        ${siguientes.filter((e) => e.clase === "reflexion").map((r) => html`<p class="reflexion">${r.texto}</p>`)}
+      </article>
+    </section>` : ""}
+  `);
+
+  // Una pregunta a la vez; al responder se ve si acertó y el titular completo.
+  let k = 0;
+  let aciertos = 0;
+  const destinoPreguntas = document.getElementById("preguntas");
+  const pintarPregunta = () => {
+    if (!preguntas.length) {
+      pintar(html`<p class="nota">${!buscador ? "Las preguntas aparecen después de la próxima recolección."
+        : leidas.size ? "Ya repasaste todo lo que abriste esta semana. Mañana hay más."
+          : "Abre algunas noticias en Hoy y vuelve: aquí te pregunto por ellas."}</p>`, destinoPreguntas);
+      return;
+    }
+    if (k >= preguntas.length) {
+      pintar(html`<div class="resultado-repaso">
+        <p class="cifra-repaso">${aciertos} de ${preguntas.length}</p>
+        <p>${aciertos === preguntas.length ? "Las recordaste todas." : "Las que fallaste vuelven mañana."}</p>
+        <ul class="lista-compacta">${preguntas.map((p) => html`<li><a href="${enlaceHistoria(p.historia)}">
+          <span class="articulo-titulo">${p.titular}</span><span class="meta">${nombres[p.hoja] || ""}</span></a></li>`)}</ul>
+      </div>`, destinoPreguntas);
+      return;
+    }
+    const p = preguntas[k];
+    pintar(html`<div class="pregunta-repaso">
+      <p class="meta">${k + 1} de ${preguntas.length} · ${nombres[p.hoja] || ""} · ${QUE_FALTA[p.tipo] || "Qué falta"}</p>
+      <p class="titular-tapado">${p.antes}<span class="hueco">?</span>${p.despues}</p>
+      <div class="opciones-repaso" role="group" aria-label="Opciones">${p.opciones.map((o, i) => html`<button
+        type="button" class="opcion-repaso" data-opcion="${i}"><kbd>${i + 1}</kbd> ${o}</button>`)}</div>
+      <div class="tras-responder" hidden></div>
+    </div>`, destinoPreguntas);
+  };
+  const responder = (i) => {
+    const p = preguntas[k];
+    const caja = destinoPreguntas.querySelector(".pregunta-repaso");
+    if (!caja || caja.dataset.respondida) return;
+    caja.dataset.respondida = "1";
+    const acierto = p.opciones[i] === p.respuesta;
+    if (acierto) aciertos++;
+    marcar({ tipo: "repaso", clase: "historia", historia: p.historia, respuesta: p.opciones[i], acierto });
+    for (const boton of caja.querySelectorAll("[data-opcion]")) {
+      const opcion = p.opciones[Number(boton.dataset.opcion)];
+      boton.disabled = true;
+      if (opcion === p.respuesta) boton.classList.add("correcta");
+      else if (Number(boton.dataset.opcion) === i) boton.classList.add("incorrecta");
+    }
+    caja.querySelector(".hueco").textContent = p.respuesta;
+    caja.querySelector(".hueco").classList.add(acierto ? "acertado" : "fallado");
+    const tras = caja.querySelector(".tras-responder");
+    pintar(html`<p>${acierto ? "Bien." : html`Era <strong>${p.respuesta}</strong>.`}
+      <a href="${enlaceHistoria(p.historia)}">Volver a la historia →</a></p>
+      <button class="boton" type="button" data-siguiente-pregunta>${k + 1 < preguntas.length ? "Siguiente" : "Ver cómo te fue"}</button>`, tras);
+    tras.hidden = false;
+    tras.querySelector("[data-siguiente-pregunta]").focus();
+  };
+
+  // Las palabras: primero se intenta recordar y después se ve lo que dijo Claude.
+  const destinoPalabras = document.getElementById("palabras");
+  const pintarPalabra = () => {
+    const p = tocan[0];
+    if (!p) {
+      const proxima = proximas.length ? new Date(Math.min(...proximas)).toISOString() : null;
+      pintar(html`<p class="nota">${palabras.length
+        ? `Nada pendiente hoy.${proxima ? ` La próxima vuelve el ${fechaLarga(proxima)}.` : ""}`
+        : "Cuando guardes palabras desde el lector (selecciona una y toca Vocabulario) y Claude las explique, aparecen aquí para repasarlas."}</p>`,
+      destinoPalabras);
+      return;
+    }
+    pintar(html`<div class="tarjeta-palabra">
+      <p class="palabra">${p.texto}</p>
+      ${p.oracion ? html`<p class="oracion">«${p.oracion}»</p>` : ""}
+      <button class="boton-secundario" type="button" data-ver-significado>¿La recuerdas? Ver lo que dijo Claude</button>
+      <div class="significado" hidden>
+        <div class="cuerpo">${seguro(markdownAHtml(p.respuestas.at(-1).texto))}</div>
+        <div class="opciones-repaso" role="group" aria-label="¿La recordabas?">
+          <button type="button" class="opcion-repaso" data-recuerdo="no">No la recordaba</button>
+          <button type="button" class="opcion-repaso" data-recuerdo="algo">Más o menos</button>
+          <button type="button" class="opcion-repaso" data-recuerdo="si">La sabía</button>
+        </div>
+      </div>
+    </div>`, destinoPalabras);
+  };
+
+  contenido.onclick = (evento) => {
+    const opcion = evento.target.closest("[data-opcion]");
+    if (opcion) responder(Number(opcion.dataset.opcion));
+    if (evento.target.closest("[data-siguiente-pregunta]")) {
+      k++;
+      pintarPregunta();
+      destinoPreguntas.querySelector("button")?.focus();
+    }
+    if (evento.target.closest("[data-ver-significado]")) {
+      destinoPalabras.querySelector(".significado").hidden = false;
+      evento.target.closest("[data-ver-significado]").remove();
+    }
+    const recuerdo = evento.target.closest("[data-recuerdo]");
+    if (recuerdo) {
+      const p = tocan.shift();
+      marcar({ tipo: "repaso", clase: "palabra", entrada: p.id, resultado: recuerdo.dataset.recuerdo });
+      proximas.push(Date.now() + INTERVALOS[siguienteCaja(p.caja, recuerdo.dataset.recuerdo)] * 864e5);
+      avisar({ no: "Vuelve mañana", algo: "Vuelve pronto", si: "Se espacia más" }[recuerdo.dataset.recuerdo]);
+      pintarPalabra();
+    }
+  };
+  // Con el teclado: 1 a 4 para responder; Enter para seguir.
+  teclasDeLaVista = (evento) => {
+    const n = Number(evento.key);
+    if (n >= 1 && n <= 4 && destinoPreguntas.querySelector(`[data-opcion="${n - 1}"]:not(:disabled)`)) {
+      responder(n - 1);
+      return true;
+    }
+    return false;
+  };
+  pintarPregunta();
+  pintarPalabra();
 }
 
 // Un solo oyente para todos los formularios del cuaderno, estén en la vista que estén.
@@ -1827,7 +2024,8 @@ async function vistaPestanas(clave, ruta) {
     <div class="dos-columnas">
       <div class="principal">
         <header class="encabezado-vista">
-          <h1>Lo relevante en ${hoja ? paginas[hoja].filtro || paginas[hoja].nombre : pestana.nombre}</h1>
+          <div class="titulo-con-acciones"><h1>Lo relevante en ${hoja ? paginas[hoja].filtro || paginas[hoja].nombre : pestana.nombre}</h1>${
+            relevante.length || resto.length ? botonEscuchar() : ""}</div>
           ${deOtroDia ? html`<p class="meta">Escrito el ${fechaLarga(pestana.fecha_relevante)}</p>` : ""}
         </header>
         ${varias ? html`<div class="filtros-pestana">
@@ -1870,6 +2068,10 @@ async function vistaPestanas(clave, ruta) {
     </div>
   `);
   escucharNoticias(profundizar, guardadas);
+  for (const h of [...pestana.hoy, ...pestana.semana]) historiasEnVista.set(h.id, h);
+  // Lo relevante con su síntesis y, después, los titulares de lo demás que no ha visto.
+  paraEscuchar = () => escucharHistorias([...relevante.map((r) => r.h), ...resto.filter((h) => !marca(h))],
+    hoja ? paginas[hoja].filtro || paginas[hoja].nombre : pestana.nombre, relevante.length || 3);
   marcar({ tipo: "visita", pagina: hoja || pestana.pestana });
 }
 
@@ -1894,10 +2096,11 @@ function cuerpoNoticia(h, visto, pagina) {
 
 // Con marca ("En Hoy", "Ya la leíste"), la noticia sale apagada y señalada. El titular es el de
 // la historia en todas las páginas: si tuvo una novedad, es lo nuevo, y debajo va lo de antes.
-function noticia(h, visto, { titulo, pagina, conFecha, marca } = {}) {
+// En Hoy, lo que ya leyó lleva su número en suave.
+function noticia(h, visto, { titulo, pagina, conFecha, marca, leida } = {}) {
   const estado = visto ? estadoDeHistoria(h, visto) : null;
   const meta = [fuentesTexto(h.fuentes.length), pagina?.nombre, conFecha ? fechaCorta(h.actualizada) : ""].filter(Boolean).join(" · ");
-  return html`<details class="noticia${marca ? " apagada" : ""}" data-historia="${h.id}">
+  return html`<details class="noticia${marca ? " apagada" : ""}${leida ? " leida" : ""}" data-historia="${h.id}">
     <summary>
       <span class="noticia-titulo">${h.titular || titulo || h.titulo}</span>
       ${h.antes ? html`<span class="noticia-antes">Antes: ${h.antes}</span>` : ""}
@@ -1911,8 +2114,10 @@ function noticia(h, visto, { titulo, pagina, conFecha, marca } = {}) {
 const botonGuardar = (archivo, guardada) => html`<button class="boton-secundario" type="button" data-guardar="${archivo}"
   aria-pressed="${String(guardada)}">${guardada ? "✓ En Para leer" : "Guardar en Para leer"}</button>`;
 
-function columnaProfundizar(lista, guardadas, nombres) {
+// Arriba puede ir algo propio de la vista, como "Desde tu última visita" en Hoy.
+function columnaProfundizar(lista, guardadas, nombres, arriba = "") {
   return html`<aside class="lateral">
+    ${arriba}
     <h2>Para profundizar</h2>
     <p class="meta">Solo por hoy. Si no te alcanza el tiempo, guárdalo en Para leer.</p>
     ${lista.length ? html`<ul class="lista-profundizar">${lista.map((l) => html`<li>
@@ -1945,29 +2150,318 @@ function escucharNoticias(profundizar, guardadas) {
   };
 }
 
+// ---------- Escuchar ----------
+// Lo relevante, una historia o una lectura en voz alta (js/voz.js). Lo que suena se resalta si
+// está en la pantalla, y una historia escuchada completa cuenta como leída.
+
+const botonEscuchar = (texto = "Escuchar") => (puedeHablar() ? html`<button class="boton-secundario boton-escuchar" type="button"
+  data-escuchar title="Escuchar (tecla e)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5l12 7-12 7z"/></svg>${texto}</button>` : "");
+
+contenido.addEventListener("click", (evento) => {
+  if (evento.target.closest("[data-escuchar]")) paraEscuchar?.();
+});
+
+// Si el navegador no puede hablar, se dice por qué en vez de quedarse callado.
+function escucharCola(cola, opciones) {
+  const pudo = escuchar(cola, { ...opciones, alFallar: (error) =>
+    avisar(`Este navegador no pudo leer en voz alta (${error}). En Edge o Chrome hay voces en español.`) });
+  if (!pudo) avisar("Este navegador no puede leer en voz alta.");
+  return pudo;
+}
+
+function resaltarSonando(selector) {
+  for (const el of document.querySelectorAll(".sonando")) el.classList.remove("sonando");
+  const el = selector && contenido.querySelector(selector);
+  if (!el) return;
+  el.classList.add("sonando");
+  const caja = el.getBoundingClientRect();
+  if (caja.top < 90 || caja.bottom > window.innerHeight - 140) el.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+// Los párrafos de un texto en Markdown, sin marcas, para leerlos en voz alta.
+function parrafosDe(markdown) {
+  const doc = new DOMParser().parseFromString(markdownAHtml(markdown || ""), "text/html");
+  return [...doc.body.children].map((b) => b.textContent.replace(/\s+/g, " ").trim()).filter(Boolean);
+}
+
+const NUMEROS = ["Uno", "Dos", "Tres", "Cuatro", "Cinco", "Seis", "Siete", "Ocho", "Nueve", "Diez", "Once", "Doce"];
+
+// Una historia para escuchar: su número en la lista, el titular y, si se pide, la síntesis.
+function historiaParaEscuchar(h, numero, conSintesis = true) {
+  const titular = h.titular || h.titulo;
+  const intro = numero ? `${NUMEROS[numero - 1] || numero}. ` : "";
+  return { clave: h.id, titulo: titular, partes: [...partir(`${intro}${titular}${/[.!?…]$/.test(titular) ? "" : "."}`),
+    ...(conSintesis ? parrafosDe(h.sintesis).flatMap((p) => partir(p)) : [])] };
+}
+
+// Las primeras con su síntesis y el resto solo con el titular.
+function escucharHistorias(historias, titulo, conSintesis = historias.length) {
+  return escucharCola(historias.map((h, i) => historiaParaEscuchar(h, i + 1, i < conSintesis)), {
+    titulo,
+    alEmpezar: (item) => resaltarSonando(item && `details.noticia[data-historia="${CSS.escape(item.clave)}"]`),
+    alTerminar: (item) => {
+      marcar({ tipo: "historia_leida", historia: item.clave, via: "voz" });
+      contenido.querySelector(`#relevante-hoy details.noticia[data-historia="${CSS.escape(item.clave)}"]`)?.classList.add("leida");
+      pintarProgresoHoy();
+    },
+  });
+}
+
+// ---------- Los nombres llevan a su página ----------
+// Dentro de la síntesis, la primera vez que aparece cada persona, organización o empresa de la
+// historia es un enlace a su página: el grafo latente aparece al tocar un nombre.
+
+// Dónde está un nombre, sin importar tildes (en los datos puede ir "Flavio" y en el texto
+// "Flávio"), siempre que en el texto empiece con mayúscula: así no se enlaza una palabra común.
+function posicionDeNombre(texto, nombre) {
+  const lugar = dondeEsta(texto, nombre);
+  return lugar && /\p{Lu}/u.test(texto[lugar[0]]) ? lugar : null;
+}
+
+function enlazarNombres(cuerpo, entidades = []) {
+  if (!cuerpo) return;
+  const pendientes = entidades.filter((e) => ["persona", "organizacion", "empresa"].includes(e.tipo) && e.nombre.length > 2);
+  const caminante = document.createTreeWalker(cuerpo, NodeFilter.SHOW_TEXT);
+  const nodos = [];
+  while (caminante.nextNode()) if (!caminante.currentNode.parentElement.closest("a")) nodos.push(caminante.currentNode);
+  for (let texto of nodos) {
+    while (texto && pendientes.length) {
+      // El nombre que aparece primero; si dos empiezan en el mismo sitio, el más largo.
+      let mejor = null;
+      for (const e of pendientes) {
+        const lugar = posicionDeNombre(texto.data, e.nombre);
+        if (lugar && (!mejor || lugar[0] < mejor.i || (lugar[0] === mejor.i && lugar[1] > mejor.fin))) mejor = { i: lugar[0], fin: lugar[1], e };
+      }
+      if (!mejor) break;
+      const nombre = texto.splitText(mejor.i);
+      texto = nombre.splitText(mejor.fin - mejor.i);
+      const enlace = document.createElement("a");
+      enlace.className = "entidad";
+      enlace.href = enlaceEntidad(mejor.e.id);
+      enlace.textContent = nombre.data;
+      nombre.replaceWith(enlace);
+      pendientes.splice(pendientes.indexOf(mejor.e), 1);
+    }
+  }
+}
+
+// Al abrir una noticia, sus nombres se vuelven enlaces.
+contenido.addEventListener("toggle", (evento) => {
+  const detalles = evento.target;
+  if (!detalles.matches?.("details.noticia[data-historia]") || !detalles.open || detalles.dataset.enlazada) return;
+  detalles.dataset.enlazada = "1";
+  const h = historiasEnVista.get(detalles.dataset.historia);
+  if (h) enlazarNombres(detalles.querySelector(":scope > .noticia-cuerpo > .cuerpo"), h.entidades);
+}, true);
+
 // ---------- Hoy ----------
 
+const PALABRAS_POR_MINUTO = 220;
+
 async function vistaHoyV2() {
-  const [inicio, indice, { visitas, leidas }, guardadas] = await Promise.all([
+  const [inicio, indice, { visitas, leidas }, guardadas, , , marcas] = await Promise.all([
     leerJSON("datos/v2/inicio.json"), leerJSON("datos/v2/indice.json"), marcasV2(), piezasGuardadas(), cargarHilosPorHistoria(),
-    leerSeguimiento()]);
+    leerSeguimiento(), todasLasMarcas()]);
   const paginas = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t]));
   const nombres = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t.nombre]));
+  const relevante = inicio.relevante;
+  for (const r of relevante) historiasEnVista.set(r.historia, r.detalle);
+  // Leída si la abrió después de su última novedad.
+  const leida = (r) => leidas.has(r.historia) && !despues(r.detalle.actualizada, leidas.get(r.historia));
+  const palabras = relevante.reduce((n, r) => n + `${r.detalle.titular || r.texto} ${r.detalle.sintesis || ""}`.split(/\s+/).length, 0);
+  const desde = ultimaVisita(marcas);
   pintar(html`
     <div class="dos-columnas">
       <div class="principal">
         <header class="encabezado-vista">
           <p class="sobretitulo">${fechaLarga(inicio.dia)}</p>
-          <h1>Lo relevante hoy</h1>
+          <div class="titulo-con-acciones"><h1>Lo relevante hoy</h1>${relevante.length ? botonEscuchar() : ""}</div>
+          ${relevante.length ? html`<div class="progreso-hoy" id="progreso-hoy" data-minutos="${Math.max(1, Math.round(palabras / PALABRAS_POR_MINUTO))}">
+            <p class="meta"></p><span class="barra-hoy"><span></span></span></div>` : ""}
         </header>
-        ${inicio.relevante.length ? html`<ol class="relevante">${inicio.relevante.map((r) => html`<li>${noticia(r.detalle,
-          masReciente(leidas.get(r.historia), visitas.get(r.detalle.hoja)), { titulo: r.texto, pagina: paginas[r.detalle.hoja] })}</li>`)}</ol>`
+        ${relevante.length ? html`<ol class="relevante" id="relevante-hoy">${relevante.map((r) => html`<li>${noticia(r.detalle,
+          masReciente(leidas.get(r.historia), visitas.get(r.detalle.hoja)), { titulo: r.texto, pagina: paginas[r.detalle.hoja], leida: leida(r) })}</li>`)}</ol>`
           : html`<p class="nota">Hoy no se escribió lo relevante. Las noticias están en Geografía, Áreas y Sectores.</p>`}
+        <section class="nombres-del-dia" id="nombres-del-dia" hidden></section>
       </div>
-      ${columnaProfundizar(inicio.profundizar, guardadas, nombres)}
+      ${columnaProfundizar(inicio.profundizar, guardadas, nombres, html`<div id="al-dia"></div>`)}
     </div>
   `);
   escucharNoticias(inicio.profundizar, guardadas);
+  pintarProgresoHoy();
+  // Abrir una noticia (o escucharla completa) la cuenta como leída.
+  document.getElementById("relevante-hoy")?.addEventListener("toggle", (evento) => {
+    if (evento.target.matches?.("details.noticia") && evento.target.open) {
+      evento.target.classList.add("leida");
+      pintarProgresoHoy();
+    }
+  }, true);
+  paraEscuchar = () => escucharHistorias(relevante.map((r) => r.detalle), "Lo relevante hoy");
+  marcar({ tipo: "visita", pagina: "hoy" });
+  // Lo que necesita más datos llega después, sin frenar lo relevante.
+  pintarAlDia(desde, indice, marcas, leidas).catch((error) => console.error(error));
+  pintarNombresDelDia().catch((error) => console.error(error));
+}
+
+// Cuántas lleva de lo relevante de hoy y cuánto le falta.
+function pintarProgresoHoy() {
+  const progreso = document.getElementById("progreso-hoy");
+  if (!progreso) return;
+  const todas = contenido.querySelectorAll("#relevante-hoy details.noticia");
+  const leidas = contenido.querySelectorAll("#relevante-hoy details.noticia.leida").length;
+  const minutos = Number(progreso.dataset.minutos);
+  progreso.querySelector(".meta").textContent = [`${todas.length} ${todas.length === 1 ? "historia" : "historias"}`,
+    `unos ${minutos} min de lectura`, leidas === todas.length ? "ya las leíste todas" : leidas ? `llevas ${leidas}` : ""].filter(Boolean).join(" · ");
+  progreso.querySelector(".barra-hoy > span").style.width = `${(100 * leidas) / Math.max(1, todas.length)}%`;
+}
+
+// ---------- Desde tu última visita ----------
+// Lo que cambió desde la última vez que Pedro abrió Hoy: lo que sigue, las respuestas de Claude,
+// los indicadores, la lectura que dejó a medias, el repaso y lo nuevo en las secciones que más
+// visita. "La última vez" es la de hace más de una hora, para que no se vacíe al volver de leer.
+
+const UNA_HORA = 36e5;
+const MAXIMO_DE_SECCIONES = 6;
+
+function ultimaVisita(marcas) {
+  const antes = Date.now() - UNA_HORA;
+  const previas = marcas.filter((m) => m.origen !== "claude" && Date.parse(m.ts) < antes);
+  return (previas.filter((m) => m.tipo === "visita" && m.pagina === "hoy").at(-1) || previas.at(-1))?.ts || null;
+}
+
+function cuandoFue(iso) {
+  const dias = Math.round((Date.parse(`${diaDeHoy()}T12:00:00-05:00`) - Date.parse(`${diaEnBogota(iso)}T12:00:00-05:00`)) / 864e5);
+  const dia = dias === 0 ? "hoy" : dias === 1 ? "ayer" : new Intl.DateTimeFormat("es-CO", { weekday: "long", timeZone: "America/Bogota" }).format(new Date(iso));
+  return `${dia === "hoy" || dia === "ayer" ? dia : `el ${dia}`} a las ${hora(iso)}`;
+}
+
+// El título de una lectura a medias: lo guarda la marca de avance; en las anteriores, se busca.
+async function tituloDeLectura(archivo, avance) {
+  if (avance.titulo) return avance.titulo;
+  if (archivo.startsWith("datos/biblioteca/")) {
+    const [biblioteca, { lecturas }] = await Promise.all([leerJSON("datos/biblioteca/indice.json"), leerJSON("catalogo/lecturas.json")]);
+    const id = Object.keys(biblioteca).find((k) => biblioteca[k].archivo === archivo);
+    return lecturas.find((l) => l.id === id)?.titulo || null;
+  }
+  return separarFicha(await leerTexto(archivo)).ficha.titulo || null;
+}
+
+// Cuántas historias nuevas o con novedades hay en cada subpestaña desde que Pedro la visitó.
+function novedadesPorSeccion(indice, marcas, desde) {
+  const pestanaDe = new Map(indice.pestanas.flatMap((p) => [[p.pestana, p], ...p.hojas.map((h) => [h, p])]));
+  const veces = new Map();
+  const visita = new Map();
+  for (const m of marcas) {
+    const p = m.tipo === "visita" && pestanaDe.get(m.pagina);
+    if (!p) continue;
+    veces.set(p.pestana, (veces.get(p.pestana) || 0) + 1);
+    if (!m.origen || m.origen === "pedro") visita.set(p.pestana, masReciente(visita.get(p.pestana), m.ts));
+  }
+  const paginas = new Map(indice.paginas.map((t) => [t.pagina, t]));
+  return indice.pestanas.map((p) => {
+    const vista = visita.get(p.pestana) || desde;
+    const ids = new Set();
+    for (const hoja of p.hojas) {
+      for (const h of paginas.get(hoja)?.historias || []) {
+        if (!vista || despues(h.creada, vista) || h.cambios.some((c) => despues(c, vista))) ids.add(h.id);
+      }
+    }
+    return { p, nuevas: ids.size, veces: veces.get(p.pestana) || 0 };
+  }).filter((s) => s.nuevas).sort((a, b) => b.veces - a.veces || b.nuevas - a.nuevas).slice(0, MAXIMO_DE_SECCIONES);
+}
+
+async function pintarAlDia(desde, indice, marcas, leidas) {
+  const [{ seguidas }, cuaderno, indicadores, avance, consulta, buscador] = await Promise.all([leerSeguimiento(),
+    leerCuaderno().catch(() => []), leerJSON("datos/indicadores/indicadores.json").catch(() => null), avances(),
+    fuentesDeConsulta().catch(() => []), indiceDelBuscador()]);
+  const destino = document.getElementById("al-dia");
+  if (!destino) return; // ya se fue de Hoy
+  const nuevo = (iso) => desde && despues(iso, desde);
+  const deLoQueSigue = [...seguidas.entries()].flatMap(([id, t]) => (t.movimientos || []).filter((m) => nuevo(m.momento))
+    .map((m) => ({ id, titular: m.titular, momento: m.momento }))).sort((a, b) => b.momento.localeCompare(a.momento));
+  const respondidas = cuaderno.filter((e) => e.respuestas.some((r) => nuevo(r.ts)));
+  const cambiaron = Object.entries(indicadores?.paises || {}).flatMap(([pid, p]) => (p.indicadores || [])
+    .filter((i) => i.cambio_detectado && nuevo(i.cambio_detectado)).map((i) => ({ pid, i })));
+  const [archivo, aMedias] = [...avance].filter(([, a]) => a.parrafo >= 2 && a.parrafo < (a.total || 0) - 2
+    && Date.now() - Date.parse(a.fecha) < 7 * 864e5).sort((a, b) => b[1].fecha.localeCompare(a[1].fecha))[0] || [];
+  const tituloAMedias = archivo ? await tituloDeLectura(archivo, aMedias).catch(() => null) : null;
+  const repasos = marcas.filter((m) => m.tipo === "repaso");
+  const preguntas = buscador ? preguntasDeHistorias({ indice: buscador, leidas, fusionadas: indice.fusionadas,
+    repasos: repasos.filter((r) => r.clase === "historia") }).length : 0;
+  const palabras = estadoDePalabras(cuaderno.filter((e) => e.clase === "palabra" && !e.archivada && e.respuestas.length),
+    repasos.filter((r) => r.clase === "palabra")).filter((p) => p.toca).length;
+  const deHoy = consulta[0]?.fecha === diaDeHoy() && !consulta[0].decision ? consulta[0] : null;
+  const secciones = novedadesPorSeccion(indice, marcas, desde);
+  const paginas = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t]));
+
+  const resumen = [deLoQueSigue.length && `${deLoQueSigue.length} ${deLoQueSigue.length === 1 ? "novedad" : "novedades"} en lo que sigues`,
+    respondidas.length && `${respondidas.length} ${respondidas.length === 1 ? "respuesta" : "respuestas"} de Claude`,
+    cambiaron.length && `${cambiaron.length} ${cambiaron.length === 1 ? "indicador cambió" : "indicadores cambiaron"}`,
+    preguntas + palabras && "repaso listo"].filter(Boolean);
+  if (!resumen.length && !secciones.length && !tituloAMedias && !deHoy) return;
+  pintar(html`<details class="al-dia"${deLoQueSigue.length || respondidas.length || cambiaron.length ? " open" : ""}>
+    <summary>
+      <span class="al-dia-titulo">${desde ? `Desde tu última visita, ${cuandoFue(desde)}` : "Para empezar"}</span>
+      <span class="meta">${resumen.length ? resumen.join(" · ") : "Lo nuevo en tus secciones"}</span>
+    </summary>
+    <div class="al-dia-cuerpo">
+      ${deLoQueSigue.length ? html`<section><h3>Lo que sigues</h3><ul class="al-dia-lista">${deLoQueSigue.slice(0, 3).map((n) => html`<li>
+        <a href="${enlaceHistoria(n.id)}">${recortar(n.titular, 110)}</a></li>`)}</ul>
+        ${deLoQueSigue.length > 3 ? html`<a class="al-dia-mas" href="#/seguimiento">Y ${deLoQueSigue.length - 3} más en Seguimiento →</a>` : ""}</section>` : ""}
+      ${respondidas.length ? html`<section><h3>Claude te respondió</h3><ul class="al-dia-lista">${respondidas.slice(0, 3).map((e) => html`<li>
+        <a href="#/cuaderno">«${recortar(e.texto, 90)}»</a>${e.titulo ? html` <span class="meta">sobre ${recortar(e.titulo, 60)}</span>` : ""}</li>`)}</ul></section>` : ""}
+      ${cambiaron.length ? html`<section><h3>Indicadores que cambiaron</h3><ul class="al-dia-lista">${cambiaron.map(({ pid, i }) => html`<li>
+        <a href="${enlacePagina(pid)}">${i.nombre}</a> <span class="meta">${paginas[pid]?.nombre || ""}:</span>
+        ${cifra(i.valor, i.unidad)}${i.anterior === null ? "" : html` <span class="meta">(antes ${cifra(i.anterior, i.unidad)})</span>`}</li>`)}</ul></section>` : ""}
+      ${tituloAMedias ? html`<section><h3>Sigue donde ibas</h3><ul class="al-dia-lista"><li>
+        <a href="${enlaceLector({ archivo })}">${tituloAMedias}</a> <span class="meta">vas en el ${porcentaje(aMedias)} %</span></li></ul></section>` : ""}
+      ${preguntas + palabras ? html`<section><h3>Para repasar</h3><ul class="al-dia-lista"><li><a href="#/repaso">${[
+        preguntas && `${preguntas} ${preguntas === 1 ? "pregunta" : "preguntas"} de lo que leíste`,
+        palabras && `${palabras} ${palabras === 1 ? "palabra" : "palabras"} del vocabulario`].filter(Boolean).join(" y ")} →</a></li></ul></section>` : ""}
+      ${deHoy ? html`<section><h3>Tu fuente de consulta de hoy</h3><ul class="al-dia-lista"><li>
+        <a href="#/para-leer">${deHoy.nombre}</a> <span class="meta">${deHoy.tema || ""}</span></li></ul></section>` : ""}
+      ${secciones.length ? html`<section><h3>${desde ? "Lo nuevo en tus secciones" : "Tus secciones"}</h3>
+        <div class="lista-chips">${secciones.map((s) => html`<a class="chip" href="#/${VISTA_DE_GRUPO[s.p.grupo]}/${s.p.slug}"
+          title="${s.nuevas} ${s.nuevas === 1 ? "historia nueva o con novedades" : "historias nuevas o con novedades"} desde tu última visita">${s.p.nombre}<span>${s.nuevas}</span></a>`)}</div></section>` : ""}
+    </div>
+  </details>`, destino);
+}
+
+// En cuántas historias aparece cada nombre. Los que se escriben distinto pero llevan a la misma
+// página ("Abelardo de la Espriella" y "Abelardo De la Espriella") cuentan como uno, con la
+// forma que más se usa.
+function contarNombres(historias, sirve = () => true) {
+  const porId = new Map();
+  for (const h of historias) {
+    const vistos = new Set();
+    for (const n of h.e || []) {
+      if (!sirve(n)) continue;
+      const id = slugV2(n);
+      const c = porId.get(id) || { id, veces: 0, formas: new Map() };
+      c.formas.set(n, (c.formas.get(n) || 0) + 1);
+      if (!vistos.has(id)) c.veces++;
+      vistos.add(id);
+      porId.set(id, c);
+    }
+  }
+  return [...porId.values()].map((c) => ({ id: c.id, veces: c.veces, nombre: [...c.formas].sort((a, b) => b[1] - a[1])[0][0] }))
+    .sort((a, b) => b.veces - a.veces);
+}
+
+// Las personas, organizaciones y empresas que más aparecen en las historias del día.
+const MINIMO_DE_HISTORIAS_DEL_NOMBRE = 3;
+
+async function pintarNombresDelDia() {
+  const buscador = await indiceDelBuscador();
+  const destino = document.getElementById("nombres-del-dia");
+  if (!buscador || !destino) return;
+  const nombres = contarNombres(buscador.historias.filter((h) => h.a === buscador.dia),
+    (n) => ["persona", "organizacion", "empresa"].includes(buscador.tipos[n])).filter((c) => c.veces >= MINIMO_DE_HISTORIAS_DEL_NOMBRE).slice(0, 14);
+  if (nombres.length < 3) return;
+  pintar(html`<h2>Quiénes están en las noticias hoy</h2>
+    <div class="lista-chips">${nombres.map((c) => html`<a class="chip" href="${enlaceEntidad(c.id)}"
+      title="En ${c.veces} historias de hoy">${c.nombre}<span>${c.veces}</span></a>`)}</div>`, destino);
+  destino.hidden = false;
 }
 
 // ---------- Las direcciones de una página llevan a su subpestaña ----------
@@ -2007,13 +2501,13 @@ async function vistaHistoria(id) {
           <h1>${h.titular || h.titulo}</h1>
           ${h.antes ? html`<p class="noticia-antes">Antes: ${h.antes}</p>` : ""}
           <p class="meta">${h.estado === "activa" ? "Activa" : "Cerrada"} desde el ${fechaCorta(h.creada)} · ${fuentesTexto(h.fuentes.length)} · última novedad: ${fechaLarga(h.actualizada, true)}</p>
-          ${h.estado === "activa" ? botonSeguir(h.id) : ""}
+          <div class="acciones-lectura">${h.estado === "activa" ? botonSeguir(h.id) : ""}${botonEscuchar()}</div>
         </header>
         ${nuevas.length ? html`<section class="nuevo-desde destacado">
           <p class="grupo">Nuevo desde que la leíste (${fechaLarga(visto, true)})</p>
           <ul>${nuevas.flatMap((a) => a.textos.map((t) => html`<li>${t}</li>`))}</ul>
         </section>` : ""}
-        <section>
+        <section class="sintesis-historia">
           <div class="cuerpo">${seguro(markdownAHtml(h.sintesis))}</div>
           ${h.lectura_claude ? html`<p class="lectura-claude"><em>Lectura de Claude: ${h.lectura_claude}</em></p>` : ""}
         </section>
@@ -2039,10 +2533,50 @@ async function vistaHistoria(id) {
       </aside>
     </article>
   `);
+  enlazarNombres(contenido.querySelector(".sintesis-historia > .cuerpo"), h.entidades);
+  paraEscuchar = () => escucharCola([{ clave: h.id, titulo: h.titular || h.titulo, partes: [
+    ...historiaParaEscuchar(h).partes,
+    ...(h.contraste ? partir(`En qué no coinciden las fuentes: ${h.contraste}`) : []),
+    ...(h.que_sigue.length ? partir(`Qué sigue: ${h.que_sigue.map((q) => `${q.cuando}, ${q.que}`).join(". ")}.`) : []),
+  ] }], { titulo: "Historia", alEmpezar: (item) => resaltarSonando(item && ".sintesis-historia") });
   marcar({ tipo: "historia_leida", historia: id });
 }
 
+// La página de un nombre: en qué historias de las dos últimas semanas aparece, por página, y
+// junto a quién. Sale del índice del buscador, que es liviano; un nombre que no esté ahí se
+// busca en el grafo completo.
 async function vistaEntidad(id) {
+  const [buscador, indice] = await Promise.all([indiceDelBuscador(), leerJSON("datos/v2/indice.json")]);
+  const variantes = Object.keys(buscador?.tipos || {}).filter((n) => slugV2(n) === id);
+  const historias = variantes.length ? buscador.historias.filter((h) => h.e?.some((n) => variantes.includes(n))) : [];
+  if (!historias.length) return vistaEntidadDelGrafo(id);
+  const veces = (n) => historias.filter((h) => h.e.includes(n)).length;
+  const [nombre] = variantes.sort((a, b) => veces(b) - veces(a));
+  const nombres = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t.nombre]));
+  const porPagina = [...agrupar(historias, (h) => h.h)].sort((a, b) => b[1].length - a[1].length);
+  const juntoA = contarNombres(historias, (n) => !variantes.includes(n)).filter((c) => c.veces >= 2 || historias.length < 4).slice(0, 18);
+  pintar(html`
+    <header class="encabezado-vista">
+      <p class="sobretitulo">${TIPOS_DE_ENTIDAD[buscador.tipos[nombre]] || "Nombre"} · en ${historias.length === 1 ? "1 historia" : `${historias.length} historias`} de ${
+        porPagina.length === 1 ? "1 página" : `${porPagina.length} páginas`} en las dos últimas semanas</p>
+      <h1>${nombre}</h1>
+    </header>
+    <div class="dos-columnas">
+      <div class="principal">${porPagina.map(([pid, lista]) => html`<section class="historias-del-nombre">
+        <h2><a class="enlace-sobrio" href="${enlacePagina(pid)}">${nombres[pid] || pid}</a> <span class="cuenta">${lista.length}</span></h2>
+        <ul class="lista-compacta">${lista.map((h) => html`<li><a href="${enlaceHistoria(h.id)}">
+          <span class="articulo-titulo">${h.t}</span>
+          ${h.s ? html`<span class="extracto">${h.s}</span>` : ""}
+          <span class="meta">${[fuentesTexto(h.f), fechaCorta(h.a), h.c ? "cerrada" : ""].filter(Boolean).join(" · ")}</span></a></li>`)}</ul>
+      </section>`)}</div>
+      ${juntoA.length ? html`<aside class="lateral"><section><h2>Aparece junto a</h2>
+        <div class="lista-chips">${juntoA.map((c) => html`<a class="chip" href="${enlaceEntidad(c.id)}"
+          title="Juntos en ${c.veces} ${c.veces === 1 ? "historia" : "historias"}">${c.nombre}<span>${c.veces}</span></a>`)}</div></section></aside>` : ""}
+    </div>
+  `);
+}
+
+async function vistaEntidadDelGrafo(id) {
   const [{ entidades }, indice] = await Promise.all([leerJSON("datos/v2/entidades.json"), leerJSON("datos/v2/indice.json")]);
   const e = entidades[id];
   if (!e) throw new Error("No se encontró ese nombre en las historias activas.");
@@ -2076,8 +2610,337 @@ function vistaNuevo(ruta) {
   location.replace(destino);
 }
 
+// ---------- Buscar: Ctrl+K, "/" o la lupa ----------
+// Historias de las dos últimas semanas, nombres, secciones, lecturas, fuentes y el Cuaderno, más
+// lo que se le puede dejar a Claude sin salir de donde se está. Sin Claude: el índice lo arma el
+// organizador cada noche (datos/v2/buscar.json).
+
+let indiceBuscador = null;
+function indiceDelBuscador() {
+  indiceBuscador ??= leerJSON("datos/v2/buscar.json").catch(() => null);
+  return indiceBuscador;
+}
+
+const IR_A = [
+  ["Hoy", "#/hoy", "inicio portada relevante"], ["Seguimiento", "#/seguimiento", "historias que sigo linea de tiempo"],
+  ["Geografía", "#/geografia", "paises regiones mundo"], ["Áreas", "#/areas", "temas"], ["Sectores", "#/sectores", "radar negocios"],
+  ["Para leer", "#/para-leer", "lecturas biblioteca libros cola guardadas"], ["Para ver", "#/para-ver", "videos cursos documentales youtube canales"],
+  ["Cuaderno", "#/cuaderno", "preguntas vocabulario frases claude conversaciones"], ["Repaso", "#/repaso", "tutor aprender recordar palabras"],
+  ["Fuentes", "#/fuentes", "catalogo medios paginas"], ["Estado", "#/estado", "sistema recoleccion fallas marcas"],
+  ["Gasto y piezas", "#/estado/gasto", "costos dinero api tope creditos"],
+];
+const GRUPOS_DE_BUSQUEDA = { visitadas: "Lo que más visitas", ir: "Ir a", seccion: "Secciones", historia: "Historias", nombre: "Nombres",
+  lectura: "Para leer y para ver", fuente: "Fuentes", cuaderno: "En tu Cuaderno", accion: "Dejarle algo a Claude" };
+const CUANTOS_POR_GRUPO = { seccion: 4, historia: 8, nombre: 4, lectura: 3, fuente: 3, cuaderno: 3 };
+const CLASES_EN_BUSQUEDA = { ...CLASES_CUADERNO, reflexion: "Reflexión", error: "Error en el texto" };
+
+const campo = (texto, peso) => [normalizar(texto), peso];
+
+async function armarCandidatos() {
+  const [buscador, indice, catalogo, agregadas, { lecturas }, biblioteca] = await Promise.all([indiceDelBuscador(),
+    leerJSON("datos/v2/indice.json"), leerJSON("catalogo/fuentes.json").catch(() => ({ fuentes: [] })),
+    leerJSON("catalogo/fuentes_agregadas.json").catch(() => ({ fuentes: [] })),
+    leerJSON("catalogo/lecturas.json").catch(() => ({ lecturas: [] })), leerJSON("datos/biblioteca/indice.json").catch(() => ({}))]);
+  const paginas = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t]));
+  const candidatos = [
+    ...IR_A.map(([nombre, href, otras]) => ({ grupo: "seccion", vista: true, href, titulo: nombre, meta: "Ir a la vista",
+      campos: [campo(nombre, 4), campo(otras, 2)], impulso: 1.3 })),
+    ...indice.pestanas.map((p) => ({ grupo: "seccion", href: `#/${VISTA_DE_GRUPO[p.grupo]}/${p.slug}`, titulo: p.nombre,
+      meta: `${p.grupo} · ${noticiasTexto(p.hoy)} hoy`, campos: [campo(p.nombre, 4)], impulso: 1.25 })),
+    ...indice.paginas.filter((t) => !indice.pestanas.some((p) => p.pestana === t.pagina)).map((t) => ({ grupo: "seccion",
+      href: enlacePagina(t.pagina), titulo: t.filtro || t.nombre, meta: `${t.seccion || t.grupo} · ${noticiasTexto(t.hoy)} hoy`,
+      campos: [campo(t.nombre, 4), campo(t.filtro, 4)], impulso: 1.2 })),
+    ...(buscador?.historias || []).map((h) => ({ grupo: "historia", href: enlaceHistoria(h.id), titulo: h.t, detalle: h.s,
+      meta: [paginas[h.h]?.nombre, fuentesTexto(h.f), fechaCorta(h.a), h.c ? "cerrada" : ""].filter(Boolean).join(" · "),
+      campos: [campo(h.t, 3), campo(h.o, 2), campo((h.e || []).join(" · "), 2.5), campo(h.s, 1), campo(paginas[h.h]?.nombre, 1.5)],
+      impulso: impulsoDeHistoria(h, buscador.dia) })),
+    ...contarNombres(buscador?.historias || []).filter((c) => c.veces >= 2).map((c) => ({ grupo: "nombre", href: enlaceEntidad(c.id),
+      titulo: c.nombre, meta: `${TIPOS_DE_ENTIDAD[buscador.tipos[c.nombre]] || "Nombre"} · en ${c.veces} historias`,
+      campos: [campo(c.nombre, 4)], impulso: 1 + 0.1 * Math.log2(c.veces) })),
+    ...lecturas.filter((l) => l.momento_final !== "Ya leído").map((l) => {
+      const archivo = biblioteca[l.id]?.archivo;
+      return { grupo: "lectura", href: archivo ? enlaceLector({ archivo }) : l.url || "#/para-leer", externo: !archivo && Boolean(l.url),
+        titulo: l.titulo, meta: [l.autor, l.momento_final, CLASES_PARA_VER.has(l.tipo) ? "Para ver" : "Para leer"].filter(Boolean).join(" · "),
+        campos: [campo(l.titulo, 3), campo(l.autor, 2.5), campo((l.etiquetas || []).join(" "), 1)] };
+    }),
+    ...[...catalogo.fuentes, ...agregadas.fuentes].filter((f) => f.url).map((f) => ({ grupo: "fuente", href: f.url, externo: true,
+      titulo: f.nombre, meta: [f.autor_o_responsable !== f.nombre ? f.autor_o_responsable : "", f.categoria_inicial].filter(Boolean).join(" · "),
+      campos: [campo(f.nombre, 4), campo(f.autor_o_responsable, 2), campo((f.etiquetas || []).join(" "), 1)], impulso: 0.9 })),
+  ];
+  return { porGrupo: agrupar(candidatos, (c) => c.grupo), indice };
+}
+
+// El Cuaderno cambia mientras se usa la página: se arma cada vez que se abre el buscador.
+async function candidatosDelCuaderno() {
+  return (await leerCuaderno().catch(() => [])).filter((e) => !e.archivada && e.clase !== "ver").map((e) => ({
+    grupo: "cuaderno", href: "#/cuaderno", titulo: e.texto,
+    meta: [CLASES_EN_BUSQUEDA[e.clase] || e.clase, fechaCorta(e.ts), e.respuestas.length ? "respondida"
+      : PROPIAS_DE_PEDRO.has(e.clase) ? "" : "por responder"].filter(Boolean).join(" · "),
+    campos: [campo(e.texto, 3), campo(e.titulo, 1.5), campo(e.respuestas.map((r) => r.texto).join(" "), 1)] }));
+}
+
+// Dónde está Pedro: una pregunta hecha desde una historia o una lectura queda atada a ella.
+function contextoActual() {
+  const [vista, ...resto] = location.hash.replace(/^#\/?/, "").split("/");
+  if (vista === "h") return { historia: decodeURIComponent(resto.join("/")), titulo: contenido.querySelector("h1")?.textContent.trim() || "" };
+  const lector = vista === "leer" && contenido.querySelector(".lector");
+  return lector ? { archivo: lector.dataset.archivo, titulo: lector.dataset.titulo } : null;
+}
+
+function accionesCon(consulta) {
+  const texto = consulta.trim();
+  if (!texto) return [];
+  const contexto = contextoActual();
+  return [
+    /^https?:\/\/\S+$/i.test(texto) && { grupo: "accion", accion: "ver", titulo: "Agregar a Para ver", meta: texto },
+    { grupo: "accion", accion: "pregunta", titulo: contexto ? `Preguntarle a Claude sobre «${recortar(contexto.titulo, 60)}»` : "Preguntarle a Claude",
+      meta: `«${texto}»` },
+    texto.length <= MAXIMO_DE_PALABRA && { grupo: "accion", accion: "palabra", titulo: "Guardar en el vocabulario", meta: `«${texto}»` },
+    { grupo: "accion", accion: "pedido", titulo: "Pedido para Mentor", meta: `«${texto}»` },
+  ].filter(Boolean);
+}
+
+function dejarEnElCuaderno(accion, texto) {
+  if (accion === "ver") marcar({ tipo: "cuaderno", clase: "ver", texto, enlace: texto, para: "videos" });
+  else marcar({ tipo: "cuaderno", clase: accion, texto, ...(accion === "pregunta" ? contextoActual() || {} : {}) });
+  avisar({ ver: "Quedó en Para ver", pregunta: "Quedó en el Cuaderno: Claude la responde con /cuaderno",
+    palabra: `"${texto}" quedó en tu vocabulario`, pedido: "Quedó en el Cuaderno como pedido para Mentor" }[accion]);
+}
+
+const paleta = document.createElement("dialog");
+paleta.className = "paleta";
+paleta.setAttribute("aria-label", "Buscar en Mentor");
+paleta.innerHTML = `<div class="paleta-caja">
+  <div class="paleta-campo">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+    <input type="text" role="combobox" aria-expanded="true" aria-controls="paleta-resultados" aria-autocomplete="list"
+      aria-label="Buscar en Mentor" autocomplete="off" spellcheck="false" enterkeyhint="go"
+      placeholder="Busca historias, nombres, países, lecturas… o escribe algo para Claude">
+  </div>
+  <div class="paleta-resultados" id="paleta-resultados" role="listbox" aria-label="Resultados"></div>
+  <p class="paleta-pie"><span><kbd>↑</kbd> <kbd>↓</kbd> moverse</span><span><kbd>Enter</kbd> abrir</span><span><kbd>Esc</kbd> cerrar</span><span><kbd>?</kbd> atajos</span></p>
+</div>`;
+document.body.append(paleta);
+const campoPaleta = paleta.querySelector("input");
+const resultadosPaleta = paleta.querySelector(".paleta-resultados");
+let candidatos = null;
+let delCuaderno = [];
+let seleccionada = 0;
+
+function seleccionar(i) {
+  const items = [...resultadosPaleta.querySelectorAll(".paleta-item")];
+  if (!items.length) {
+    campoPaleta.removeAttribute("aria-activedescendant");
+    return;
+  }
+  seleccionada = (i + items.length) % items.length;
+  items.forEach((el, k) => el.setAttribute("aria-selected", String(k === seleccionada)));
+  campoPaleta.setAttribute("aria-activedescendant", items[seleccionada].id);
+  items[seleccionada].scrollIntoView({ block: "nearest" });
+}
+
+// Sin nada escrito: lo que más visita y las vistas. Con algo escrito: cada grupo con lo que
+// coincide, primero el grupo que mejor coincide, y al final lo que se le puede dejar a Claude.
+async function pintarResultados() {
+  if (!candidatos) return;
+  const consulta = campoPaleta.value;
+  let grupos;
+  if (!consulta.trim()) {
+    const secciones = candidatos.porGrupo.get("seccion");
+    const veces = new Map();
+    const marcas = await todasLasMarcas();
+    if (campoPaleta.value !== consulta) return; // mientras tanto escribió algo
+    for (const m of marcas) {
+      if (m.tipo !== "visita" || !m.pagina || m.pagina === "hoy") continue;
+      const pestana = candidatos.indice.pestanas.find((p) => p.pestana === m.pagina || p.hojas.includes(m.pagina));
+      const href = IR_A.some(([, h]) => h === `#/${m.pagina}`) ? `#/${m.pagina}`
+        : pestana && (pestana.pestana === m.pagina || pestana.hojas.length === 1) ? `#/${VISTA_DE_GRUPO[pestana.grupo]}/${pestana.slug}`
+          : enlacePagina(m.pagina);
+      veces.set(href, (veces.get(href) || 0) + 1);
+    }
+    const visitadas = [...veces].sort((a, b) => b[1] - a[1]).map(([href]) => secciones.find((s) => s.href === href)).filter(Boolean).slice(0, 5);
+    grupos = [["visitadas", visitadas], ["ir", secciones.filter((s) => s.vista)]].filter(([, lista]) => lista.length);
+  } else {
+    grupos = Object.keys(CUANTOS_POR_GRUPO)
+      .map((g) => [g, buscar(g === "cuaderno" ? delCuaderno : candidatos.porGrupo.get(g) || [], consulta, CUANTOS_POR_GRUPO[g])])
+      .filter(([, lista]) => lista.length).sort((a, b) => b[1][0].puntaje - a[1][0].puntaje);
+    grupos.push(["accion", accionesCon(consulta)]);
+  }
+  let n = 0;
+  const item = (r) => {
+    const dentro = html`<span class="paleta-titulo">${r.titulo}</span>${r.meta ? html`<span class="paleta-meta">${r.meta}</span>` : ""}${
+      r.detalle ? html`<span class="paleta-detalle">${r.detalle}</span>` : ""}`;
+    const id = `paleta-opcion-${n++}`;
+    return r.accion ? html`<button type="button" class="paleta-item" role="option" id="${id}" data-accion="${r.accion}">${dentro}</button>`
+      : html`<a class="paleta-item" role="option" id="${id}" href="${r.href}"${r.externo ? seguro(' target="_blank" rel="noopener noreferrer"') : ""}>${dentro}</a>`;
+  };
+  pintar(html`${grupos.length > 1 || consulta.trim() ? grupos.map(([g, lista]) => html`<section class="paleta-grupo">
+      <h3>${GRUPOS_DE_BUSQUEDA[g]}</h3>${lista.map(item)}</section>`) : ""}
+    ${consulta.trim() && grupos.length === 1 ? html`<p class="paleta-vacia">Nada con «${consulta.trim()}» en las dos últimas semanas.</p>` : ""}`,
+  resultadosPaleta);
+  seleccionar(0);
+}
+
+async function abrirPaleta(consulta) {
+  if (!paleta.open) paleta.showModal();
+  if (typeof consulta === "string") campoPaleta.value = consulta;
+  campoPaleta.select();
+  if (!candidatos) {
+    resultadosPaleta.innerHTML = '<p class="paleta-vacia">Cargando…</p>';
+    try {
+      candidatos = await armarCandidatos();
+    } catch (error) {
+      console.error(error);
+      resultadosPaleta.innerHTML = '<p class="paleta-vacia">No se pudo cargar el buscador. Revisa tu conexión.</p>';
+      return;
+    }
+  }
+  delCuaderno = await candidatosDelCuaderno();
+  pintarResultados();
+}
+
+function activarSeleccionada() {
+  const elegida = resultadosPaleta.querySelectorAll(".paleta-item")[seleccionada];
+  if (elegida) elegida.click();
+}
+
+campoPaleta.addEventListener("input", pintarResultados);
+paleta.addEventListener("keydown", (evento) => {
+  if (evento.key === "ArrowDown" || evento.key === "ArrowUp") {
+    seleccionar(seleccionada + (evento.key === "ArrowDown" ? 1 : -1));
+    evento.preventDefault();
+  } else if (evento.key === "Enter" && !evento.isComposing) {
+    activarSeleccionada();
+    evento.preventDefault();
+  }
+});
+resultadosPaleta.addEventListener("click", (evento) => {
+  const accion = evento.target.closest("[data-accion]");
+  if (accion) dejarEnElCuaderno(accion.dataset.accion, campoPaleta.value.trim());
+  if (evento.target.closest(".paleta-item")) paleta.close();
+});
+resultadosPaleta.addEventListener("pointermove", (evento) => {
+  const item = evento.target.closest(".paleta-item");
+  if (item) seleccionar([...resultadosPaleta.querySelectorAll(".paleta-item")].indexOf(item));
+});
+// Un toque fuera de la caja la cierra.
+paleta.addEventListener("click", (evento) => {
+  if (evento.target === paleta) paleta.close();
+});
+document.getElementById("boton-buscar")?.addEventListener("click", () => abrirPaleta());
+
+// #/buscar/<lo que sea>: Hoy de fondo y el buscador abierto con eso escrito.
+async function vistaBuscar(consulta) {
+  await vistaHoyV2();
+  abrirPaleta(consulta || "");
+}
+
+// ---------- Atajos de teclado ----------
+// En el computador: buscar, bajar y subir por las noticias, abrirlas, seguirlas, preguntar,
+// escuchar y saltar entre secciones sin el ratón. No actúan mientras se escribe.
+
+const IR_CON_G = { h: "#/hoy", s: "#/seguimiento", g: "#/geografia", a: "#/areas", e: "#/sectores", l: "#/para-leer",
+  v: "#/para-ver", c: "#/cuaderno", r: "#/repaso", f: "#/fuentes", t: "#/estado" };
+const NAVEGABLES = "details.noticia, .seguida, .lectura, .lista-profundizar > li, .hilo, .frase, .lista-compacta > li";
+// Cada atajo: sus teclas, lo que va entre ellas y lo que hace.
+const ATAJOS = [
+  [["Ctrl", "K"], "+", "Buscar, ir a cualquier sección o dejarle algo a Claude (también con /)"],
+  [["j"], "", "Bajar a la siguiente noticia o lectura"],
+  [["k"], "", "Subir a la anterior"],
+  [["o"], "", "Abrir o cerrar la que está marcada"],
+  [["s"], "", "Seguir o soltar la historia marcada"],
+  [["p"], "", "Preguntarle a Claude sobre la historia marcada, o sobre lo que tienes abierto"],
+  [["e"], "", "Escuchar lo que tienes en pantalla; si ya suena, pausar o seguir"],
+  [["[", "]"], "o", "Subpestaña anterior o siguiente"],
+  [["g", "h"], "y luego", "Ir a Hoy. Con g y otra letra: s Seguimiento, g Geografía, a Áreas, e Sectores, l Para leer, v Para ver, c Cuaderno, r Repaso, f Fuentes, t Estado"],
+  [["1", "4"], "a", "En el Repaso, responder con la opción de ese número"],
+  [["?"], "", "Esta ayuda"],
+];
+let esperandoG = 0;
+
+const ayuda = document.createElement("dialog");
+ayuda.className = "ayuda-atajos";
+ayuda.setAttribute("aria-label", "Atajos de teclado");
+ayuda.innerHTML = html`<div class="ayuda-caja">
+  <h2>Atajos de teclado</h2>
+  <dl>${ATAJOS.map(([teclas, entre, que]) => html`<div><dt>${teclas.map((t, i) => html`${i ? ` ${entre} ` : ""}<kbd>${t}</kbd>`)}</dt><dd>${que}</dd></div>`)}</dl>
+  <p class="meta">No actúan mientras escribes. <button type="button" class="boton-texto" data-cerrar-ayuda>Cerrar</button></p>
+</div>`.texto;
+document.body.append(ayuda);
+ayuda.addEventListener("click", (evento) => {
+  if (evento.target === ayuda || evento.target.closest("[data-cerrar-ayuda]")) ayuda.close();
+});
+
+function moverFoco(paso) {
+  const items = [...contenido.querySelectorAll(NAVEGABLES)].filter((el) => el.getClientRects().length);
+  if (!items.length) return;
+  const actual = contenido.querySelector(".enfocada");
+  let i = actual ? items.indexOf(actual) : -1;
+  // Sin ninguna marcada, se empieza por la primera que se ve en la pantalla.
+  if (i < 0) i = Math.max(0, items.findIndex((el) => el.getBoundingClientRect().bottom > 90)) - (paso > 0 ? 1 : 0);
+  const siguiente = items[Math.max(0, Math.min(items.length - 1, i + paso))];
+  actual?.classList.remove("enfocada");
+  siguiente.classList.add("enfocada");
+  (siguiente.querySelector(":scope > summary, a, button") || siguiente).focus({ preventScroll: true });
+  siguiente.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function preguntarSobreLaMarcada(actual) {
+  const detalles = actual?.matches("details.noticia") ? actual : null;
+  if (detalles && !detalles.open) detalles.querySelector(":scope > summary").click();
+  const preguntar = (detalles || contenido).querySelector("details.preguntar");
+  if (!preguntar) return;
+  preguntar.open = true;
+  preguntar.querySelector("textarea")?.focus();
+}
+
+function cambiarPestana(paso) {
+  const enlaces = [...contenido.querySelectorAll(".pestanas a")];
+  const i = enlaces.findIndex((a) => a.getAttribute("aria-current") === "page");
+  if (i >= 0) enlaces[(i + paso + enlaces.length) % enlaces.length].click();
+}
+
+document.addEventListener("keydown", (evento) => {
+  if ((evento.ctrlKey || evento.metaKey) && !evento.altKey && evento.key.toLowerCase() === "k") {
+    evento.preventDefault();
+    if (paleta.open) paleta.close();
+    else abrirPaleta();
+    return;
+  }
+  if (evento.defaultPrevented || evento.ctrlKey || evento.metaKey || evento.altKey) return;
+  if (evento.target.closest?.("input, textarea, select, [contenteditable]") || document.querySelector("dialog[open]")) return;
+  if (teclasDeLaVista?.(evento)) {
+    evento.preventDefault();
+    return;
+  }
+  const tecla = evento.key;
+  if (Date.now() - esperandoG < 1500) {
+    esperandoG = 0;
+    if (IR_CON_G[tecla]) {
+      location.hash = IR_CON_G[tecla];
+      evento.preventDefault();
+    }
+    return;
+  }
+  const actual = contenido.querySelector(".enfocada");
+  if (tecla === "/") abrirPaleta();
+  else if (tecla === "?") ayuda.showModal();
+  else if (tecla === "g") esperandoG = Date.now();
+  else if (tecla === "j" || tecla === "k") moverFoco(tecla === "j" ? 1 : -1);
+  else if (tecla === "o" && actual) (actual.matches("details") ? actual.querySelector(":scope > summary") : actual.querySelector("a"))?.click();
+  else if (tecla === "s" && actual) actual.querySelector("[data-seguir]")?.click();
+  else if (tecla === "p") preguntarSobreLaMarcada(actual);
+  else if (tecla === "e") {
+    if (!pausarOSeguir()) paraEscuchar?.();
+  } else if (tecla === "[" || tecla === "]") cambiarPestana(tecla === "]" ? 1 : -1);
+  else return;
+  evento.preventDefault();
+});
+
 const VISTAS = {
   hoy: vistaHoyV2,
+  buscar: vistaBuscar,
+  repaso: vistaRepaso,
   geografia: (ruta) => vistaPestanas("geografia", ruta),
   areas: (ruta) => vistaPestanas("areas", ruta),
   sectores: (ruta) => vistaPestanas("sectores", ruta),
@@ -2097,9 +2960,9 @@ const VISTAS = {
   conectar: vistaConectar,
 };
 // Las vistas que usan el ancho del computador; las demás quedan en una columna de lectura.
-const VISTAS_ANCHAS = new Set(["hoy", "geografia", "areas", "sectores", "p", "h", "e"]);
+const VISTAS_ANCHAS = new Set(["hoy", "buscar", "geografia", "areas", "sectores", "p", "h", "e"]);
 // Qué sección de la barra se ilumina en las vistas que no tienen la suya.
-const NAVEGACION_DE = { leer: "hoy", nuevo: "hoy", vocabulario: "cuaderno" };
+const NAVEGACION_DE = { leer: "hoy", nuevo: "hoy", buscar: "hoy", vocabulario: "cuaderno", repaso: "cuaderno" };
 
 const posiciones = {};
 let rutaActual = null;
@@ -2127,6 +2990,10 @@ async function enrutar() {
   contenido.classList.toggle("amplio", VISTAS_ANCHAS.has(vista));
   contenido.onclick = null;
   contenido.onchange = null;
+  paraEscuchar = null;
+  teclasDeLaVista = null;
+  historiasEnVista.clear();
+  for (const dialogo of document.querySelectorAll("dialog[open]")) dialogo.close();
   menuSeleccion.hidden = true;
   contenido.innerHTML = '<p class="cargando">Cargando…</p>';
   try {
