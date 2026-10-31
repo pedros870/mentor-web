@@ -581,6 +581,18 @@ progress.gasto::-moz-progress-bar { background: var(--acento); border-radius: 99
   .aviso-flotante { bottom: 1.5rem; }
 }
 
+.aviso-accion {
+  margin-left: 0.35rem;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* ---------- Lector ---------- */
 
 .lector { max-width: 40rem; margin: 0 auto; }

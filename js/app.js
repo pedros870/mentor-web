@@ -1,7 +1,8 @@
 // Mentor: la interfaz de lectura. Una sola página con vistas por dirección
 // (#/hoy, #/geografia, #/areas, #/sectores, #/p/…, #/h/…, #/leer/…, #/para-leer, #/cuaderno, #/repaso, #/estado…).
 import { buscar, impulsoDeHistoria, normalizar } from "./buscador.js";
-import { ErrorDeDatos, REPO_POR_DEFECTO, borrarConfig, config, guardarConfig, leerJSON, leerTexto, modoLocal } from "./datos.js";
+import { ErrorDeDatos, REPO_POR_DEFECTO, alActualizar, borrarConfig, config, guardarConfig, laVistaUsa, leerJSON, leerTexto, modoLocal,
+  nuevaVista, tenerListo } from "./datos.js";
 import { enLinea, escapar, markdownAHtml, separarFicha } from "./markdown.js";
 import { alCambiar, enviar, estadoDeEnvio, marcar, todasLasMarcas } from "./marcas.js";
 import { INTERVALOS, dondeEsta, estadoDePalabras, fraseDelDia, preguntasDeHistorias, siguienteCaja } from "./repaso.js";
@@ -9,14 +10,26 @@ import { escuchar, partir, pausarOSeguir, puedeHablar } from "./voz.js";
 
 const contenido = document.getElementById("contenido");
 
-// Un aviso breve al pie de la pantalla, para confirmar que una marca quedó guardada.
+// Un aviso breve al pie de la pantalla, para confirmar que una marca quedó guardada. Con una
+// acción, lleva un botón y dura más.
 let temporizadorAviso = null;
-function avisar(texto) {
+function avisar(texto, accion) {
   const aviso = document.getElementById("aviso");
-  aviso.textContent = texto;
+  aviso.replaceChildren(texto);
+  if (accion) {
+    const boton = document.createElement("button");
+    boton.type = "button";
+    boton.className = "aviso-accion";
+    boton.textContent = accion.texto;
+    boton.addEventListener("click", () => {
+      aviso.hidden = true;
+      accion.hacer();
+    });
+    aviso.append(" ", boton);
+  }
   aviso.hidden = false;
   clearTimeout(temporizadorAviso);
-  temporizadorAviso = setTimeout(() => { aviso.hidden = true; }, 2500);
+  temporizadorAviso = setTimeout(() => { aviso.hidden = true; }, accion ? 20000 : 2500);
 }
 
 let ultimoError = null;
@@ -1211,7 +1224,7 @@ async function vistaCuaderno() {
     ${archivados.length ? html`<details class="mas"><summary>Archivado (${archivados.length})</summary>
       ${archivados.map((x) => hilo(x))}</details>` : ""}
   `);
-  marcar({ tipo: "visita", pagina: "cuaderno" });
+  marcarVisita("cuaderno");
 }
 
 const SUBPESTANAS_CUADERNO = [{ vista: "cuaderno", nombre: "Conversaciones" }, { vista: "repaso", nombre: "Repaso" }];
@@ -1909,7 +1922,7 @@ async function vistaSeguimiento() {
         <span class="articulo-titulo">${a.titulo}</span><span class="meta">Sin novedad desde el ${fechaCorta(a.cerrada)}</span></a></li>`)}</ul>
     </details>` : ""}
   `);
-  marcar({ tipo: "visita", pagina: "seguimiento" });
+  marcarVisita("seguimiento");
 }
 
 // Lo guardado desde "Para profundizar": lo que la biblioteca juntó cada noche, más las marcas recientes.
@@ -2072,7 +2085,7 @@ async function vistaPestanas(clave, ruta) {
   // Lo relevante con su síntesis y, después, los titulares de lo demás que no ha visto.
   paraEscuchar = () => escucharHistorias([...relevante.map((r) => r.h), ...resto.filter((h) => !marca(h))],
     hoja ? paginas[hoja].filtro || paginas[hoja].nombre : pestana.nombre, relevante.length || 3);
-  marcar({ tipo: "visita", pagina: hoja || pestana.pestana });
+  marcarVisita(hoja || pestana.pestana);
 }
 
 // ---------- Las noticias, que se abren ahí mismo ----------
@@ -2297,10 +2310,29 @@ async function vistaHoyV2() {
     }
   }, true);
   paraEscuchar = () => escucharHistorias(relevante.map((r) => r.detalle), "Lo relevante hoy");
-  marcar({ tipo: "visita", pagina: "hoy" });
-  // Lo que necesita más datos llega después, sin frenar lo relevante.
-  pintarAlDia(desde, indice, marcas, leidas).catch((error) => console.error(error));
-  pintarNombresDelDia().catch((error) => console.error(error));
+  marcarVisita("hoy");
+  // Lo que necesita más datos llega después, sin frenar lo relevante; si la vista se vuelve a
+  // pintar mientras tanto, esto ya no va a ninguna parte.
+  pintarAlDia(document.getElementById("al-dia"), desde, indice, marcas, leidas).catch((error) => console.error(error))
+    .finally(() => tenerListasLasSecciones(indice, marcas));
+  pintarNombresDelDia(document.getElementById("nombres-del-dia")).catch((error) => console.error(error));
+}
+
+// Las secciones que más visitas quedan en la copia desde que abres Hoy, para que abran al
+// instante también la primera vez del día. Con el ahorro de datos del celular, no.
+const SECCIONES_LISTAS = 3;
+
+function tenerListasLasSecciones(indice, marcas) {
+  if (navigator.connection?.saveData) return;
+  const pestanaDe = new Map(indice.pestanas.flatMap((p) => [[p.pestana, p], ...p.hojas.map((h) => [h, p])]));
+  const veces = new Map();
+  for (const m of marcas) {
+    const p = m.tipo === "visita" && pestanaDe.get(m.pagina);
+    if (p) veces.set(p.pestana, (veces.get(p.pestana) || 0) + 1);
+  }
+  for (const [pestana] of [...veces].sort((a, b) => b[1] - a[1]).slice(0, SECCIONES_LISTAS)) {
+    tenerListo(`datos/v2/pestanas/${pestana}.json`).catch(() => {});
+  }
 }
 
 // Cuántas lleva de lo relevante de hoy y cuánto le falta.
@@ -2370,12 +2402,11 @@ function novedadesPorSeccion(indice, marcas, desde) {
   }).filter((s) => s.nuevas).sort((a, b) => b.veces - a.veces || b.nuevas - a.nuevas).slice(0, MAXIMO_DE_SECCIONES);
 }
 
-async function pintarAlDia(desde, indice, marcas, leidas) {
+async function pintarAlDia(destino, desde, indice, marcas, leidas) {
   const [{ seguidas }, cuaderno, indicadores, avance, consulta, buscador] = await Promise.all([leerSeguimiento(),
     leerCuaderno().catch(() => []), leerJSON("datos/indicadores/indicadores.json").catch(() => null), avances(),
     fuentesDeConsulta().catch(() => []), indiceDelBuscador()]);
-  const destino = document.getElementById("al-dia");
-  if (!destino) return; // ya se fue de Hoy
+  if (!destino?.isConnected) return; // ya se fue de Hoy, o Hoy se volvió a pintar
   const nuevo = (iso) => desde && despues(iso, desde);
   const deLoQueSigue = [...seguidas.entries()].flatMap(([id, t]) => (t.movimientos || []).filter((m) => nuevo(m.momento))
     .map((m) => ({ id, titular: m.titular, momento: m.momento }))).sort((a, b) => b.momento.localeCompare(a.momento));
@@ -2451,10 +2482,9 @@ function contarNombres(historias, sirve = () => true) {
 // Las personas, organizaciones y empresas que más aparecen en las historias del día.
 const MINIMO_DE_HISTORIAS_DEL_NOMBRE = 3;
 
-async function pintarNombresDelDia() {
+async function pintarNombresDelDia(destino) {
   const buscador = await indiceDelBuscador();
-  const destino = document.getElementById("nombres-del-dia");
-  if (!buscador || !destino) return;
+  if (!buscador || !destino?.isConnected) return;
   const nombres = contarNombres(buscador.historias.filter((h) => h.a === buscador.dia),
     (n) => ["persona", "organizacion", "empresa"].includes(buscador.tipos[n])).filter((c) => c.veces >= MINIMO_DE_HISTORIAS_DEL_NOMBRE).slice(0, 14);
   if (nombres.length < 3) return;
@@ -2976,10 +3006,60 @@ function mostrarError(error) {
   </section>`);
 }
 
+// ---------- Cuando llega algo más reciente que lo que se pintó ----------
+// La vista se pinta desde la copia del navegador y la revisión llega un momento después. Si trae
+// algo nuevo para lo que está en pantalla y no la has tocado, se vuelve a pintar sola; si ya la
+// estás usando, se avisa y la actualizas cuando quieras. Las marcas nuevas de otro dispositivo
+// no avisan: entran en la siguiente vista.
+
+let empezadaEn = 0;
+let pintadaEn = 0;
+let tocadaEn = 0;
+let repintando = false;
+let repintarAlTerminar = false;
+for (const tipo of ["pointerdown", "keydown", "wheel", "touchstart"]) {
+  document.addEventListener(tipo, () => { tocadaEn = Date.now(); }, { capture: true, passive: true });
+}
+
+alActualizar((cambio) => {
+  if (cambio.sinConexion) {
+    avisar("Sin conexión con GitHub: lo que ves es la copia guardada en este navegador.");
+    return;
+  }
+  if (cambio.archivos.length) {
+    if (cambio.archivos.includes("datos/v2/buscar.json")) indiceBuscador = null;
+    if (!paleta.open) candidatos = null; // el buscador se rearma la próxima vez que se abra
+  }
+  const toca = laVistaUsa(cambio.archivos);
+  if (!toca && !cambio.marcas) return;
+  if (empezadaEn > pintadaEn) {
+    repintarAlTerminar = true; // la vista se está pintando: se repinta apenas termine
+    return;
+  }
+  const quieta = tocadaEn < pintadaEn && !document.querySelector("dialog[open]") && !document.body.classList.contains("con-reproductor");
+  if (quieta) repintarVista();
+  else if (toca) avisar("Llegó información más reciente.", { texto: "Actualizar", hacer: repintarVista });
+});
+
+async function repintarVista() {
+  repintando = true;
+  try {
+    await enrutar();
+  } finally {
+    repintando = false;
+  }
+}
+
+// Volver a pintar una vista no es otra visita.
+function marcarVisita(pagina) {
+  if (!repintando) marcar({ tipo: "visita", pagina });
+}
+
 async function enrutar() {
   const [nombre = "hoy", ...resto] = location.hash.replace(/^#\/?/, "").split("/");
   if (rutaActual) posiciones[rutaActual] = window.scrollY;
   rutaActual = location.hash || "#/hoy";
+  empezadaEn = Date.now();
 
   if (!modoLocal() && !config().token && nombre !== "conectar") {
     location.hash = "#/conectar";
@@ -2995,14 +3075,22 @@ async function enrutar() {
   historiasEnVista.clear();
   for (const dialogo of document.querySelectorAll("dialog[open]")) dialogo.close();
   menuSeleccion.hidden = true;
-  contenido.innerHTML = '<p class="cargando">Cargando…</p>';
+  const aviso = document.getElementById("aviso");
+  if (aviso.querySelector(".aviso-accion")) aviso.hidden = true; // la vista nueva ya trae lo reciente
+  if (!repintando) contenido.innerHTML = '<p class="cargando">Cargando…</p>';
+  nuevaVista();
   try {
     await VISTAS[vista](decodeURIComponent(resto.join("/")));
   } catch (error) {
     console.error(error);
     mostrarError(error);
   }
-  window.scrollTo(0, vista === "leer" ? 0 : posiciones[rutaActual] || 0);
+  pintadaEn = Date.now();
+  window.scrollTo(0, vista === "leer" && !repintando ? 0 : posiciones[rutaActual] || 0);
+  if (repintarAlTerminar) {
+    repintarAlTerminar = false;
+    setTimeout(repintarVista);
+  }
 }
 
 // ---------- Tema claro, oscuro o automático ----------

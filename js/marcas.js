@@ -3,16 +3,23 @@
 // en datos/marcas/AAAA/MM/DD-<dispositivo>.jsonl: un archivo por día y por
 // dispositivo, al que solo se le agregan líneas. Las tareas de GitHub nunca
 // escriben esos archivos, así que no hay choques.
+//
+// Las de los últimos días llegan con la revisión de la copia (datos.js), que trae en una sola
+// consulta todos los archivos de marcas del mes; si GitHub no la responde, se leen todos a la vez.
 
-import { config, modoLocal } from "./datos.js";
+import { config, copiaAlDia, despuesDeCadaRevision, guardarAparte, leerAparte, modoLocal, revisarTambien, revision } from "./datos.js";
 
 const CLAVE_COLA = "mentor.marcas.cola";
 const CLAVE_DISPOSITIVO = "mentor.dispositivo";
 const API = "https://api.github.com/repos";
+const DIAS_DE_MARCAS = 10;
+const COPIA_DE_MARCAS = "marcas.json";
 
 const estado = { enviando: false, error: null, enviadas: 0 };
 const oyentes = new Set();
 let recibidas = null; // las marcas ya guardadas en el repositorio
+let cargando = null; // la primera lectura: todas las partes de la página esperan la misma
+const enviadasAhora = []; // las que salieron en esta visita, por si la lectura empezó antes
 let temporizador = null;
 
 function leerAlmacen(clave, defecto) {
@@ -129,9 +136,11 @@ export async function enviar() {
       // Solo se quitan de la cola las que ya quedaron guardadas.
       const enviadas = new Set(marcas.map((m) => m.id));
       guardarAlmacen(CLAVE_COLA, leerAlmacen(CLAVE_COLA, []).filter((m) => !enviadas.has(m.id)));
-      recibidas?.push(...marcas);
+      enviadasAhora.push(...marcas);
       estado.enviadas += marcas.length;
     }
+    // La copia queda con lo enviado, para que la próxima visita no lo tome por nuevo.
+    if (recibidas) guardarAparte(COPIA_DE_MARCAS, JSON.stringify([...recibidas, ...enviadasAhora]));
     estado.error = null;
   } catch (error) {
     estado.error = [401, 403, 404].includes(error.estado)
@@ -144,30 +153,99 @@ export async function enviar() {
 }
 
 // Las marcas de los últimos días, las del repositorio más las que esperan aquí.
-export async function todasLasMarcas(dias = 10) {
-  if (recibidas === null) {
+export async function todasLasMarcas() {
+  cargando ??= cargarMarcas();
+  await cargando;
+  const vistas = new Set();
+  return [...recibidas, ...enviadasAhora, ...leerAlmacen(CLAVE_COLA, [])]
+    .filter((m) => !m.id || (!vistas.has(m.id) && vistas.add(m.id)))
+    .sort((a, b) => a.ts.localeCompare(b.ts));
+}
+
+// Con la copia al día, las marcas guardadas sirven ya y la revisión trae las nuevas después; si
+// no, se espera la revisión. Sin revisión, se leen los archivos uno por uno (todos a la vez), y
+// sin conexión queda lo que había en la copia.
+async function cargarMarcas() {
+  if (modoLocal() || !config().token) {
     recibidas = [];
-    if (!modoLocal() && config().token) {
-      const hoy = new Date();
-      const meses = new Set();
-      for (let d = 0; d < dias; d++) meses.add(diaDeBogota(new Date(hoy - d * 864e5)).slice(0, 7));
-      const desde = diaDeBogota(new Date(hoy - dias * 864e5));
-      for (const mes of meses) {
-        const r = await fetch(`${API}/${config().repo}/contents/datos/marcas/${mes.replace("-", "/")}`,
-          { headers: cabeceras(), cache: "no-store" });
-        if (!r.ok) continue;
-        for (const archivo of await r.json()) {
-          if (`${mes}-${archivo.name.slice(0, 2)}` < desde || !archivo.name.endsWith(".jsonl")) continue;
-          const { texto } = await leerArchivo(archivo.path);
-          for (const linea of texto.split("\n")) {
-            if (linea.trim()) { try { recibidas.push(JSON.parse(linea)); } catch { /* línea dañada */ } }
-          }
-        }
-      }
+    return;
+  }
+  if (copiaAlDia()) {
+    const guardadas = await marcasDeLaCopia();
+    if (guardadas) {
+      recibidas ??= guardadas;
+      revision().catch(() => {});
+      return;
     }
   }
-  return [...recibidas, ...leerAlmacen(CLAVE_COLA, [])].sort((a, b) => a.ts.localeCompare(b.ts));
+  await revision().catch(() => {});
+  if (recibidas === null) {
+    recibidas = await archivosUnoPorUno().then(marcasDe).catch(() => null);
+    if (recibidas) guardarAparte(COPIA_DE_MARCAS, JSON.stringify(recibidas));
+  }
+  recibidas ??= (await marcasDeLaCopia()) || [];
 }
+
+async function marcasDeLaCopia() {
+  try { return JSON.parse(await leerAparte(COPIA_DE_MARCAS)); } catch { return null; }
+}
+
+// Las carpetas de los meses que cubren los últimos días.
+function carpetasDeMarcas() {
+  const meses = new Set();
+  for (let d = 0; d <= DIAS_DE_MARCAS; d++) meses.add(diaDeBogota(new Date(Date.now() - d * 864e5)).slice(0, 7));
+  return [...meses].map((mes) => `datos/marcas/${mes.replace("-", "/")}`);
+}
+
+const fechaDe = (ruta) => ruta.match(/(\d{4})\/(\d{2})\/(\d{2})-[^/]*\.jsonl$/)?.slice(1).join("-");
+
+function marcasDe(archivos) {
+  const desde = diaDeBogota(new Date(Date.now() - DIAS_DE_MARCAS * 864e5));
+  const marcas = [];
+  for (const { ruta, texto } of archivos) {
+    if (!(fechaDe(ruta) >= desde)) continue;
+    for (const linea of texto.split("\n")) {
+      if (linea.trim()) { try { marcas.push(JSON.parse(linea)); } catch { /* línea dañada */ } }
+    }
+  }
+  return marcas;
+}
+
+async function leerCrudo(ruta) {
+  const r = await fetch(`${API}/${config().repo}/contents/${ruta}`,
+    { headers: { ...cabeceras(), Accept: "application/vnd.github.raw+json" }, cache: "no-store" });
+  if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status} al leer ${ruta}`), { estado: r.status });
+  return r.text();
+}
+
+async function archivosUnoPorUno() {
+  const listas = await Promise.all(carpetasDeMarcas().map(async (carpeta) => {
+    const r = await fetch(`${API}/${config().repo}/contents/${carpeta}`, { headers: cabeceras(), cache: "no-store" });
+    if (r.status === 404) return [];
+    if (!r.ok) throw new Error(`HTTP ${r.status} al leer ${carpeta}`);
+    return (await r.json()).map((archivo) => archivo.path);
+  }));
+  const desde = diaDeBogota(new Date(Date.now() - DIAS_DE_MARCAS * 864e5));
+  return Promise.all(listas.flat().filter((ruta) => fechaDe(ruta) >= desde)
+    .map(async (ruta) => ({ ruta, texto: await leerCrudo(ruta) })));
+}
+
+// Cada revisión trae los archivos de marcas de todos los dispositivos. Si hay marcas que esta
+// página no tenía (las del celular, por ejemplo), la vista puede volver a pintarse con ellas.
+revisarTambien(carpetasDeMarcas);
+despuesDeCadaRevision(async ({ textos }) => {
+  const carpetas = carpetasDeMarcas().filter((carpeta) => carpeta in textos);
+  if (!carpetas.length) return false;
+  const archivos = await Promise.all(carpetas.flatMap((carpeta) => textos[carpeta].map(async (e) => {
+    const ruta = `${carpeta}/${e.name}`;
+    return { ruta, texto: e.object?.isTruncated ? await leerCrudo(ruta) : e.object?.text || "" };
+  })));
+  const frescas = marcasDe(archivos);
+  const conocidas = recibidas && new Set([...recibidas, ...enviadasAhora, ...leerAlmacen(CLAVE_COLA, [])].map((m) => m.id));
+  recibidas = frescas;
+  guardarAparte(COPIA_DE_MARCAS, JSON.stringify(frescas));
+  return Boolean(conocidas) && frescas.some((m) => m.id && !conocidas.has(m.id));
+});
 
 // Al salir de la página, intenta enviar lo pendiente.
 document.addEventListener("visibilitychange", () => {
