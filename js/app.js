@@ -64,7 +64,7 @@ const TIPOS_DE_FALLA = {
 const MOTIVOS_DE_EXTRACTO = {
   pago: "de pago", bloqueo: "el sitio bloquea", robots: "robots.txt", no_encontrado: "no encontrado",
   sin_texto: "sin texto", pagina_js: "página armada en el navegador", error_de_red: "error de red",
-  error_del_sitio: "error del sitio", busqueda: "llegó por una búsqueda del radar; solo se tiene el titular",
+  error_del_sitio: "error del sitio",
 };
 
 // ---------- Plantillas: todo valor se escapa salvo lo marcado como seguro ----------
@@ -1065,8 +1065,9 @@ async function vistaRadar() {
         <h2>${s.nombre} <span class="cuenta">${hoy.length} hoy</span></h2>
         <div class="insignias">${s.subtemas.map((t) => html`<span class="insignia">${t}</span>`)}</div>
         ${hoy.length ? html`<ul class="lista-articulos compacta">${hoy.slice(0, 5).map(itemArticulo)}</ul>` : html`<p class="meta">Sin artículos de sus fuentes en esta recolección.</p>`}
-        <p class="meta">Desde la etapa del radar: ${s.consultas_es.length + s.consultas_en.length} búsquedas en Google Noticias${
-          s.paginas_a_monitorear.length ? ` y ${s.paginas_a_monitorear.length === 1 ? "una página" : `${s.paginas_a_monitorear.length} páginas`} de reguladores` : ""}.</p>
+        <p class="meta">Para la etapa del radar: ${s.consultas_es.length + s.consultas_en.length} consultas por seguir${
+          s.paginas_a_monitorear.length ? ` y ${s.paginas_a_monitorear.length === 1 ? "una página" : `${s.paginas_a_monitorear.length} páginas`} de reguladores` : ""}.
+          Todavía no se recolectan solas: los buscadores de noticias no lo permiten o traen mucho ruido.</p>
       </section>`;
     })}
   `);
