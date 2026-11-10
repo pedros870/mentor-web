@@ -1444,7 +1444,8 @@ main > .grupos { margin-bottom: 1rem; }
 }
 .cifras-hoy::-webkit-scrollbar { display: none; }
 .cifras-hoy:hover .cifra-nombre { color: var(--texto); }
-.cifra { flex: none; display: flex; flex-direction: column; gap: 0.05rem; }
+/* position: relative deja dentro de la fila el texto oculto para lectores de pantalla ("subió", "bajó"); sin eso, se sale de la fila y ensancha toda la página en el celular. */
+.cifra { flex: none; display: flex; flex-direction: column; gap: 0.05rem; position: relative; }
 .cifra-nombre { font-size: 0.75rem; color: var(--texto-suave); white-space: nowrap; }
 .cifra-valor { font: 600 1.15rem/1.25 var(--sans); white-space: nowrap; }
 .cifra-unidad { font-size: 0.78rem; font-weight: 500; color: var(--texto-suave); }
@@ -1532,3 +1533,37 @@ main > .grupos { margin-bottom: 1rem; }
   details.mas > summary, .bloque-todo, .volver { min-height: 2.5rem; display: flex; align-items: center; }
   .boton-secundario { min-height: 2.5rem; }
 }
+
+/* ---------- La semana: el balance de las historias, las señales de los sectores y una región para entender ---------- */
+
+.balances { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--borde); counter-reset: balance; }
+.balances > li { counter-increment: balance; position: relative; padding: 1rem 0 1.1rem 2.4rem; border-bottom: 1px solid var(--borde); max-width: 44rem; }
+.balances > li::before {
+  content: counter(balance);
+  position: absolute;
+  left: 0;
+  top: 1.05rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 999px;
+  background: var(--acento);
+  color: var(--acento-texto);
+  font-size: 0.8rem;
+  display: grid;
+  place-items: center;
+}
+.balances h3 { margin: 0; font: 600 1.2rem/1.3 var(--serif); }
+.balances .meta { margin: 0.15rem 0 0.5rem; }
+.balance { margin: 0 0 0.6rem; font-family: var(--serif); font-size: 1.08rem; line-height: 1.6; }
+.balances .importa { margin-bottom: 0.6rem; }
+.balances details.mas { margin-top: 0.25rem; }
+.balances details.mas > summary { font-size: 0.88rem; font-weight: 600; }
+.senales { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--borde); }
+.senales li { padding: 0.75rem 0; border-bottom: 1px solid var(--borde); max-width: 44rem; }
+.senal-texto { font-family: var(--serif); font-size: 1.05rem; line-height: 1.55; }
+.senales .meta { display: block; margin-top: 0.3rem; }
+.senales .meta a { color: var(--texto-suave); text-underline-offset: 2px; }
+.region-de-la-semana { max-width: 40rem; }
+.region-titulo { margin: 0.6rem 0 0.25rem; font: 600 1.35rem/1.3 var(--serif); }
+.region-contexto { margin: 0 0 0.9rem; font-size: 0.95rem; }
+.region-de-la-semana h4 { margin: 1rem 0 0.3rem; font: 700 0.78rem var(--sans); letter-spacing: 0.07em; text-transform: uppercase; color: var(--texto-suave); }

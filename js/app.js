@@ -1,5 +1,5 @@
-// Mentor: la interfaz de lectura. Una sola página con vistas por dirección. Cuatro destinos en la
-// barra: Hoy (#/hoy), Explorar (#/geografia, #/areas, #/sectores, #/p/…, #/h/…, #/e/…), Biblioteca
+// Mentor: la interfaz de lectura. Una sola página con vistas por dirección. Cinco destinos en la
+// barra: Hoy (#/hoy), Semana (#/semana), Explorar (#/geografia, #/areas, #/sectores, #/p/…, #/h/…, #/e/…), Biblioteca
 // (#/para-leer, #/para-ver, #/leer/…) y Cuaderno (#/cuaderno, #/repaso). Lo del sistema
 // (#/estado, #/fuentes) va en un botón aparte.
 import { buscar, impulsoDeHistoria, normalizar } from "./buscador.js";
@@ -64,7 +64,7 @@ const TIPOS_DE_FALLA = {
 const MOTIVOS_DE_EXTRACTO = {
   pago: "de pago", bloqueo: "el sitio bloquea", robots: "robots.txt", no_encontrado: "no encontrado",
   sin_texto: "sin texto", pagina_js: "página armada en el navegador", error_de_red: "error de red",
-  error_del_sitio: "error del sitio",
+  error_del_sitio: "error del sitio", busqueda: "llegó por una búsqueda del radar; solo se tiene el titular",
 };
 
 // ---------- Plantillas: todo valor se escapa salvo lo marcado como seguro ----------
@@ -2113,12 +2113,13 @@ function noticia(h, visto, { titulo, pagina, lugar, conFecha, marca, leida, dia,
 const botonGuardar = (archivo, guardada) => html`<button class="boton-secundario" type="button" data-guardar="${archivo}"
   aria-pressed="${String(guardada)}">${guardada ? "✓ En Para leer" : "Guardar en Para leer"}</button>`;
 
-// Arriba puede ir algo propio de la vista, como "Desde tu última visita" en Hoy.
-function columnaProfundizar(lista, guardadas, nombres, arriba = "") {
+// Las lecturas largas de una vista: las del día en Hoy y en cada subpestaña, las de la semana en Semana.
+function columnaProfundizar(lista, guardadas, nombres, arriba = "", { titulo = "Para profundizar",
+  nota = "Solo por hoy. Si no te alcanza el tiempo, guárdalo en Para leer.", vacio = "Hoy no hay lecturas largas aquí." } = {}) {
   return html`<aside class="lateral">
     ${arriba}
-    <h2>Para profundizar</h2>
-    <p class="meta">Solo por hoy. Si no te alcanza el tiempo, guárdalo en Para leer.</p>
+    <h2>${titulo}</h2>
+    <p class="meta">${nota}</p>
     ${lista.length ? html`<ul class="lista-profundizar">${lista.map((l) => html`<li>
       <a class="enlace-sobrio" href="${enlaceLector(l)}"><span class="articulo-titulo">${l.titulo}</span></a>
       <span class="meta">${[l.fuente, l.minutos ? `${l.minutos} min` : "", nombres?.[l.hoja]].filter(Boolean).join(" · ")}</span>
@@ -2127,7 +2128,7 @@ function columnaProfundizar(lista, guardadas, nombres, arriba = "") {
         ${botonGuardar(l.archivo, guardadas.has(l.archivo))}
         ${l.url ? html`<a class="boton-secundario" href="${l.url}" target="_blank" rel="noopener noreferrer">Original ↗</a>` : ""}
       </div>
-    </li>`)}</ul>` : html`<p class="nota">Hoy no hay lecturas largas aquí.</p>`}
+    </li>`)}</ul>` : html`<p class="nota">${vacio}</p>`}
   </aside>`;
 }
 
@@ -2494,11 +2495,14 @@ function novedadesPorSeccion(indice, marcas, desde) {
 }
 
 async function pintarAlDia(destino, desde, indice, marcas, leidas) {
-  const [cuaderno, indicadores, avance, consulta, buscador] = await Promise.all([
+  const [cuaderno, indicadores, avance, consulta, buscador, semana] = await Promise.all([
     leerCuaderno().catch(() => []), leerJSON("datos/indicadores/indicadores.json").catch(() => null), avances(),
-    fuentesDeConsulta().catch(() => []), indiceDelBuscador()]);
+    fuentesDeConsulta().catch(() => []), indiceDelBuscador(), leerJSON("datos/v2/semana.json").catch(() => null)]);
   if (!destino?.isConnected) return; // ya se fue de Hoy, o Hoy se volvió a pintar
   const nuevo = (iso) => desde && despues(iso, desde);
+  // La edición de la semana se anuncia hasta que Pedro la abre, o hasta que sale la siguiente.
+  const vioLaSemana = marcas.filter((m) => m.tipo === "visita" && m.pagina === "semana").reduce((ultima, m) => masReciente(ultima, m.ts), null);
+  const edicion = semana?.generado && Date.now() - Date.parse(semana.generado) < 7 * 864e5 && despues(semana.generado, vioLaSemana) ? semana : null;
   const respondidas = cuaderno.filter((e) => e.respuestas.some((r) => nuevo(r.ts)));
   const cambiaron = Object.entries(indicadores?.paises || {}).flatMap(([pid, p]) => (p.indicadores || [])
     .filter((i) => i.cambio_detectado && nuevo(i.cambio_detectado)).map((i) => ({ pid, i })));
@@ -2514,7 +2518,8 @@ async function pintarAlDia(destino, desde, indice, marcas, leidas) {
   const secciones = novedadesPorSeccion(indice, marcas, desde);
   const paginas = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t]));
 
-  const resumen = [respondidas.length && `${respondidas.length} ${respondidas.length === 1 ? "respuesta" : "respuestas"} de Claude`,
+  const resumen = [edicion && "ya salió la edición de la semana",
+    respondidas.length && `${respondidas.length} ${respondidas.length === 1 ? "respuesta" : "respuestas"} de Claude`,
     cambiaron.length && `${cambiaron.length} ${cambiaron.length === 1 ? "indicador cambió" : "indicadores cambiaron"}`,
     preguntas + palabras && "repaso listo"].filter(Boolean);
   if (!resumen.length && !secciones.length && !tituloAMedias && !deHoy) return;
@@ -2524,6 +2529,9 @@ async function pintarAlDia(destino, desde, indice, marcas, leidas) {
       <span class="meta">${resumen.length ? resumen.join(" · ") : "Lo nuevo en tus secciones"}</span>
     </summary>
     <div class="al-dia-cuerpo">
+      ${edicion ? html`<section><h3>La edición de la semana</h3><ul class="al-dia-lista"><li>
+        <a href="#/semana">${edicion.historias?.length > 1 ? `La semana en ${edicion.historias.length} historias` : "La semana, ya decantada"} →</a>
+        <span class="meta">del ${fechaCorta(edicion.desde)} al ${fechaCorta(edicion.hasta)}</span></li></ul></section>` : ""}
       ${respondidas.length ? html`<section><h3>Claude te respondió</h3><ul class="al-dia-lista">${respondidas.slice(0, 3).map((e) => html`<li>
         <a href="#/cuaderno">«${recortar(e.texto, 90)}»</a>${e.titulo ? html` <span class="meta">sobre ${recortar(e.titulo, 60)}</span>` : ""}</li>`)}</ul></section>` : ""}
       ${cambiaron.length ? html`<section><h3>Indicadores que cambiaron</h3><ul class="al-dia-lista">${cambiaron.map(({ pid, i }) => html`<li>
@@ -2577,6 +2585,94 @@ async function pintarNombresDelDia(destino) {
     <div class="lista-chips">${nombres.map((c) => html`<a class="chip" href="${enlaceEntidad(c.id)}"
       title="En ${c.veces} historias de hoy">${c.nombre}<span>${c.veces}</span></a>`)}</div>`, destino);
   destino.hidden = false;
+}
+
+// ---------- La semana ----------
+// La edición de los sábados (scripts/semana.py): lo que cambió en siete días, ya decantado. El
+// balance de las historias que más pesaron, las señales de cada sector de Pedro, una región para
+// entender, por turno, y las lecturas largas de la semana.
+
+const TIPOS_DE_SENAL = { "regulación": "Regulación", "tecnología": "Tecnología", competidor: "Competidor", precio: "Precio",
+  demanda: "Demanda", "financiación": "Financiación", "mano de obra": "Mano de obra", otra: "Otra" };
+
+async function vistaSemana() {
+  const [semana, indice, guardadas] = await Promise.all([leerJSON("datos/v2/semana.json").catch(() => null),
+    leerJSON("datos/v2/indice.json"), piezasGuardadas()]);
+  if (!semana) {
+    pintar(html`<header class="encabezado-vista"><p class="sobretitulo">Una vez por semana</p><h1>La semana</h1></header>
+      <p class="nota">La primera edición sale el sábado, con la corrida de la madrugada: el balance de las historias que más
+        pesaron en siete días, las señales de tus sectores, una región para entender y las lecturas largas.</p>`);
+    return;
+  }
+  const paginas = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t]));
+  const nombres = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t.nombre]));
+  const enlaceDe = (id) => (indice.historias[id] || indice.fusionadas?.[id] ? enlaceHistoria(id) : null);
+  const titulo = (h, texto) => (enlaceDe(h.id) ? html`<a class="enlace-sobrio" href="${enlaceDe(h.id)}">${texto}</a>` : texto);
+  const conSenales = semana.sectores.filter((s) => s.senales.length);
+  // Sin los textos de Claude, de un sector se ven los titulares de sus historias.
+  const soloTitulares = semana.sectores.filter((s) => !s.senales.length && s.historias.length);
+  const sinNada = semana.sectores.filter((s) => !s.senales.length && !s.historias.length);
+  const region = semana.region;
+  pintar(html`
+    <div class="dos-columnas semana">
+      <div class="principal">
+        <header class="encabezado-vista">
+          <p class="sobretitulo">Del ${fechaCorta(semana.desde)} al ${fechaLarga(semana.hasta)}</p>
+          <h1>La semana</h1>
+          <p class="meta">Lo que cambió en siete días, ya decantado: una vez por semana, para leer con calma.${
+            semana.con_claude ? "" : " Esta edición salió sin los textos de Claude: van los titulares."}</p>
+        </header>
+        <section class="parte-hoy">
+          <h2 class="rotulo rotulo-principal">${semana.historias.length === 1 ? "La historia de la semana" : `La semana en ${semana.historias.length} historias`}</h2>
+          ${semana.historias.length ? html`<ol class="balances">${semana.historias.map((h) => html`<li>
+            <h3>${titulo(h, h.titulo)}</h3>
+            <p class="meta">${[paginas[h.hoja]?.nombre, fuentesTexto(h.fuentes), h.dias > 1 ? `novedades en ${h.dias} días` : ""].filter(Boolean).join(" · ")}</p>
+            <p class="balance">${h.balance || h.titular}</p>
+            ${h.importa ? html`<p class="importa"><strong>Por qué importa.</strong> ${h.importa}</p>` : ""}
+            ${h.mirar ? html`<p class="que-sigue-corto"><strong>Para mirar:</strong> ${h.mirar}</p>` : ""}
+            ${h.movimientos.length > 1 ? html`<details class="mas"><summary>Sus ${h.movimientos.length} novedades de la semana</summary>
+              <ul class="linea-tiempo">${h.movimientos.map((m) => html`<li><span class="fecha">${fechaCorta(m.fecha)}</span>${m.titular}</li>`)}</ul></details>` : ""}
+          </li>`)}</ol>` : html`<p class="nota">Esta semana ninguna historia tuvo una novedad de peso.</p>`}
+        </section>
+        <section class="parte-hoy">
+          <h2 class="rotulo rotulo-sectores">Tus sectores</h2>
+          ${conSenales.map((s) => html`<div class="bloque-hoy">
+            <h3 class="bloque-titulo"><a class="enlace-sobrio" href="${enlacePagina(s.pagina)}">${s.sector}</a></h3>
+            <ul class="senales">${s.senales.map((x) => html`<li>
+              <span class="insignia insignia-tipo">${TIPOS_DE_SENAL[x.tipo] || x.tipo}</span>
+              <span class="senal-texto">${x.texto}</span>
+              ${x.historias.filter(enlaceDe).length ? html`<span class="meta">${x.historias.filter(enlaceDe).map((id, i) => html`${i ? " · " : ""}<a
+                href="${enlaceHistoria(id)}">${s.historias.find((h) => h.id === id)?.titulo || "la historia"}</a>`)}</span>` : ""}
+            </li>`)}</ul>
+          </div>`)}
+          ${soloTitulares.map((s) => html`<div class="bloque-hoy">
+            <h3 class="bloque-titulo"><a class="enlace-sobrio" href="${enlacePagina(s.pagina)}">${s.sector}</a></h3>
+            <ul class="lista-compacta">${s.historias.slice(0, 4).map((h) => html`<li><a href="${enlaceDe(h.id) || enlacePagina(s.pagina)}">
+              <span class="articulo-titulo">${h.titular}</span><span class="meta">${fuentesTexto(h.fuentes)}</span></a></li>`)}</ul>
+          </div>`)}
+          ${sinNada.length ? html`<p class="meta sin-novedades">Sin señales esta semana: ${sinNada.map((s, i) => html`${i ? ", " : ""}<a
+            class="enlace-sobrio" href="${enlacePagina(s.pagina)}">${s.sector}</a>`)}.</p>` : ""}
+        </section>
+        ${region ? html`<section class="parte-hoy region-de-la-semana">
+          <h2 class="rotulo rotulo-mundo">Para entender: ${region.nombre}</h2>
+          ${region.texto ? html`
+            <h3 class="region-titulo">${region.titulo}</h3>
+            ${region.contexto ? html`<p class="meta region-contexto">${region.contexto}</p>` : ""}
+            <div class="cuerpo">${seguro(markdownAHtml(region.texto))}</div>
+            ${region.mirar?.length ? html`<h4>Para mirar</h4><ul class="que-sigue">${region.mirar.map((m) => html`<li>${m}</li>`)}</ul>` : ""}`
+            : html`<p class="nota">${region.historias.length ? "Sus historias de la semana:" : "Esta semana no hubo historias de peso aquí."}</p>`}
+          ${region.historias.length ? html`<details class="mas"${region.texto ? "" : " open"}><summary>Sus historias de la semana (${region.historias.length})</summary>
+            <ul class="lista-compacta">${region.historias.map((h) => html`<li><a href="${enlaceDe(h.id) || enlacePagina(region.pagina)}">
+              <span class="articulo-titulo">${h.titular}</span><span class="meta">${fuentesTexto(h.fuentes)}</span></a></li>`)}</ul></details>` : ""}
+          ${region.pagina ? html`<a class="bloque-todo" href="${enlacePagina(region.pagina)}">Todo ${region.nombre} →</a>` : ""}
+        </section>` : ""}
+      </div>
+      ${columnaProfundizar(semana.lecturas, guardadas, nombres, "", { titulo: "Para leer con calma",
+        nota: "Las lecturas largas de la semana. Las que no alcances, guárdalas en Para leer.", vacio: "Esta semana no hubo lecturas largas." })}
+    </div>
+  `);
+  escucharNoticias(semana.lecturas, guardadas);
+  marcarVisita("semana");
 }
 
 // ---------- Las direcciones de una página llevan a su subpestaña ----------
@@ -2757,7 +2853,7 @@ function indiceDelBuscador() {
 }
 
 const IR_A = [
-  ["Hoy", "#/hoy", "inicio portada relevante principal vistazo"],
+  ["Hoy", "#/hoy", "inicio portada relevante principal vistazo"], ["La semana", "#/semana", "edicion semanal balance señales region sabado"],
   ["Geografía", "#/geografia", "explorar paises regiones mundo"], ["Áreas", "#/areas", "explorar temas"], ["Sectores", "#/sectores", "explorar radar negocios"],
   ["Para leer", "#/para-leer", "lecturas biblioteca libros cola guardadas"], ["Para ver", "#/para-ver", "biblioteca videos cursos documentales youtube canales"],
   ["Cuaderno", "#/cuaderno", "preguntas vocabulario frases claude conversaciones"], ["Repaso", "#/repaso", "tutor aprender recordar palabras"],
@@ -2974,7 +3070,7 @@ async function vistaBuscar(consulta) {
 // En el computador: buscar, bajar y subir por las noticias, abrirlas, preguntar, escuchar y
 // saltar entre secciones sin el ratón. No actúan mientras se escribe.
 
-const IR_CON_G = { h: "#/hoy", g: "#/geografia", a: "#/areas", e: "#/sectores", l: "#/para-leer",
+const IR_CON_G = { h: "#/hoy", s: "#/semana", g: "#/geografia", a: "#/areas", e: "#/sectores", l: "#/para-leer",
   v: "#/para-ver", c: "#/cuaderno", r: "#/repaso", f: "#/fuentes", t: "#/estado" };
 const NAVEGABLES = "details.noticia, .lectura, .lista-profundizar > li, .hilo, .frase, .lista-compacta > li";
 // Cada atajo: sus teclas, lo que va entre ellas y lo que hace.
@@ -2986,7 +3082,7 @@ const ATAJOS = [
   [["p"], "", "Preguntarle a Claude sobre la historia marcada, o sobre lo que tienes abierto"],
   [["e"], "", "Escuchar lo que tienes en pantalla; si ya suena, pausar o seguir"],
   [["[", "]"], "o", "Subpestaña anterior o siguiente"],
-  [["g", "h"], "y luego", "Ir a Hoy. Con g y otra letra: g Geografía, a Áreas, e Sectores, l Para leer, v Para ver, c Cuaderno, r Repaso, f Fuentes, t Estado"],
+  [["g", "h"], "y luego", "Ir a Hoy. Con g y otra letra: s Semana, g Geografía, a Áreas, e Sectores, l Para leer, v Para ver, c Cuaderno, r Repaso, f Fuentes, t Estado"],
   [["1", "4"], "a", "En el Repaso, responder con la opción de ese número"],
   [["?"], "", "Esta ayuda"],
 ];
@@ -3088,6 +3184,7 @@ const VISTAS = {
   radar: vistaRadar,
   cuaderno: vistaCuaderno,
   explorar: vistaExplorar,
+  semana: vistaSemana,
   biblioteca: () => location.replace("#/para-leer"),
   seguimiento: () => location.replace("#/hoy"), // Seguimiento se quitó el 10 de noviembre de 2026
   vocabulario: vistaCuaderno,
@@ -3095,7 +3192,7 @@ const VISTAS = {
   conectar: vistaConectar,
 };
 // Las vistas que usan el ancho del computador; las demás quedan en una columna de lectura.
-const VISTAS_ANCHAS = new Set(["hoy", "buscar", "geografia", "areas", "sectores", "p", "h", "e"]);
+const VISTAS_ANCHAS = new Set(["hoy", "semana", "buscar", "geografia", "areas", "sectores", "p", "h", "e"]);
 // Qué destino de la barra se ilumina en cada vista: Hoy, Explorar, Biblioteca, Cuaderno o el
 // botón del sistema.
 const NAVEGACION_DE = { nuevo: "hoy", buscar: "hoy", geografia: "explorar", areas: "explorar", sectores: "explorar", p: "explorar",
