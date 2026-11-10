@@ -13,6 +13,11 @@
   --aviso: #7a5d12;
   --aviso-fondo: #f5ecd2;
   --sombra: 0 1px 2px rgb(40 30 20 / 0.05), 0 4px 14px rgb(40 30 20 / 0.05);
+  /* Los rótulos de las partes de Hoy: una marca de color junto al nombre, nunca el color solo. */
+  --tono-principal: #a8471f;
+  --tono-sectores: #158f63;
+  --tono-colombia: #c98500;
+  --tono-mundo: #2a78d6;
   --serif: Charter, "Bitstream Charter", "Iowan Old Style", "Sitka Text", Cambria, Georgia, serif;
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   --ancho: 46rem;
@@ -33,6 +38,10 @@
     --aviso: #e6c870;
     --aviso-fondo: #33290f;
     --sombra: none;
+    --tono-principal: #d95926;
+    --tono-sectores: #199e70;
+    --tono-colombia: #c98500;
+    --tono-mundo: #3987e5;
     color-scheme: dark;
   }
 }
@@ -49,6 +58,10 @@
   --aviso: #e6c870;
   --aviso-fondo: #33290f;
   --sombra: none;
+  --tono-principal: #d95926;
+  --tono-sectores: #199e70;
+  --tono-colombia: #c98500;
+  --tono-mundo: #3987e5;
   color-scheme: dark;
 }
 
@@ -88,7 +101,7 @@ h2 { font-size: 1.2rem; margin: 0 0 0.75rem; }
   z-index: 10;
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem;
   padding: 0.75rem 16px;
   padding-top: calc(0.75rem + env(safe-area-inset-top));
   /* Fondo sólido: un filtro de desenfoque aquí ataría la barra inferior a la cabecera. */
@@ -129,7 +142,7 @@ h2 { font-size: 1.2rem; margin: 0 0 0.75rem; }
   gap: 2px;
   color: var(--texto-suave);
   text-decoration: none;
-  font-size: 0.66rem;
+  font-size: 0.75rem;
   min-width: 0;
 }
 
@@ -145,17 +158,23 @@ h2 { font-size: 1.2rem; margin: 0 0 0.75rem; }
   stroke-linejoin: round;
 }
 
-.boton-tema {
+.boton-tema, .boton-sistema {
+  flex: none;
   border: 1px solid var(--borde);
   background: var(--superficie);
   color: var(--texto);
   border-radius: 999px;
-  width: 2.25rem;
-  height: 2.25rem;
+  width: 2.75rem;
+  height: 2.75rem;
   display: grid;
   place-items: center;
   cursor: pointer;
 }
+
+/* El botón del sistema: estado, gasto y fuentes. */
+.boton-sistema { color: var(--texto-suave); }
+.boton-sistema[aria-current] { color: var(--acento); background: var(--acento-suave); border-color: transparent; }
+.boton-sistema svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 
 .boton-tema .relleno { fill: currentColor; stroke: none; }
 
@@ -612,7 +631,8 @@ progress.gasto::-moz-progress-bar { background: var(--acento); border-radius: 99
   font-family: var(--serif);
   font-size: 1.15rem;
   line-height: 1.7;
-  hyphens: auto;
+  hyphens: manual;
+  text-wrap: pretty;
   overflow-wrap: break-word;
 }
 
@@ -698,24 +718,15 @@ details ol { margin: 0.75rem 0; padding-left: 1.3em; }
 .formulario { display: grid; gap: 0.9rem; margin-top: 1rem; }
 .formulario label { display: grid; gap: 0.3rem; font-weight: 600; font-size: 0.9rem; }
 
-/* ---------- Navegación: Fuentes y Estado arriba en el celular ---------- */
-
-.atajos { display: flex; gap: 0.25rem; }
-.atajos a { display: grid; place-items: center; width: 2.25rem; height: 2.25rem; border-radius: 999px; color: var(--texto-suave); }
-.atajos a[aria-current] { color: var(--acento); background: var(--acento-suave); }
-.atajos svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-.navegacion a.solo-ancho { display: none; }
+/* ---------- Navegación: cuatro destinos; lo del sistema, en su botón ---------- */
 
 @media (min-width: 860px) {
-  .atajos { display: none; }
-  .navegacion a.solo-ancho { display: flex; }
-  .navegacion a { flex: none; padding: 0.4rem 0.6rem; font-size: 0.9rem; }
+  .cabecera { gap: 0.75rem; }
+  .navegacion { margin-right: auto; }
+  .marca { margin-right: 1.25rem; }
+  .navegacion a { flex: none; padding: 0.45rem 0.85rem; font-size: 0.95rem; }
   .navegacion svg { flex: none; }
-}
-
-/* Entre tableta y computador pequeño, los ocho nombres caben sin íconos. */
-@media (min-width: 860px) and (max-width: 1239px) {
-  .navegacion svg { display: none; }
+  .boton-tema, .boton-sistema { width: 2.25rem; height: 2.25rem; }
 }
 
 /* ---------- Hoy, Geografía, Áreas y Sectores: grillas para escoger, páginas para leer ---------- */
@@ -916,8 +927,12 @@ details.mas > .noticias, details.mas > .lista-compacta { margin-top: 0.5rem; }
 .historia-completa section { margin: 1.5rem 0; }
 .historia-completa .lateral section:first-child { margin-top: 0; }
 .historia-completa h1 { margin-bottom: 0.3rem; }
-.linea-tiempo, .que-sigue { margin: 0; padding-left: 1.1rem; }
-.linea-tiempo li, .que-sigue li { margin: 0.4rem 0; line-height: 1.45; }
+.que-sigue { margin: 0; padding-left: 1.1rem; }
+.que-sigue li { margin: 0.4rem 0; line-height: 1.45; }
+/* La línea de tiempo, de lo más reciente a lo más antiguo: la fecha arriba de cada hecho. */
+.linea-tiempo { list-style: none; margin: 0.4rem 0 0; padding: 0 0 0 0.9rem; border-left: 2px solid var(--borde); }
+.linea-tiempo li { margin: 0 0 0.8rem; line-height: 1.45; font-size: 0.95rem; }
+.linea-tiempo .fecha { display: block; font-size: 0.78rem; color: var(--texto-suave); font-variant-numeric: tabular-nums; }
 .lista-compacta a .insignia { align-self: flex-start; margin: 0 0 0.25rem; }
 
 .guardadas { margin: 0 0 1.5rem; }
@@ -1067,18 +1082,8 @@ details.preguntar[open] > summary, details.seguir[open] > summary { margin-botto
 .tabla-cifras th[scope="row"], .tabla-cifras thead th:first-child { text-align: left; font-weight: 500; }
 .tabla-cifras thead th { color: var(--texto-suave); font-weight: 500; font-size: 0.8rem; border-top: 0; }
 
-/* ---------- La novedad como titular y Seguimiento ---------- */
-.noticia-antes { display: block; margin-top: 0.15rem; font-size: 0.88rem; color: var(--texto-suave); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.boton-seguir { margin-right: 0.6rem; }
-.seguidas { display: grid; gap: 0.25rem; }
-.seguida { padding: 1rem 0; border-top: 1px solid var(--borde); }
-.seguida.apagada { opacity: 0.5; }
-.seguida-titulo { display: block; font-family: var(--serif); font-size: 1.15rem; font-weight: 600; color: var(--texto); text-decoration: none; }
-.seguida-titulo:hover { color: var(--acento); }
-.linea-seguida { list-style: none; margin: 0.6rem 0 0.5rem; padding: 0 0 0 0.9rem; border-left: 2px solid var(--borde); }
-.linea-seguida li { display: grid; grid-template-columns: 4.5rem 1fr; gap: 0.6rem; padding: 0.3rem 0; font-size: 0.95rem; }
-.linea-seguida .fecha { color: var(--texto-suave); font-variant-numeric: tabular-nums; }
-.linea-seguida li.nuevo { margin-left: -0.9rem; padding-left: 0.75rem; border-left: 3px solid var(--acento); background: var(--acento-suave); border-radius: 0 8px 8px 0; }
+/* ---------- La novedad como titular ---------- */
+.noticia-antes { display: block; margin: 0.35rem 0 0; font-size: 0.9rem; color: var(--texto-suave); }
 .filtros-area { margin-top: -0.4rem; }
 .indicadores { margin: 0.5rem 0 1.5rem; }
 .indicadores h2 { font-size: 1.05rem; margin-bottom: 0.3rem; }
@@ -1110,9 +1115,10 @@ details.preguntar[open] > summary, details.seguir[open] > summary { margin-botto
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: none;
   gap: 0.45rem;
-  height: 2.25rem;
-  min-width: 2.25rem;
+  height: 2.75rem;
+  min-width: 2.75rem;
   padding: 0 0.5rem;
   border: 1px solid var(--borde);
   border-radius: 999px;
@@ -1125,7 +1131,10 @@ details.preguntar[open] > summary, details.seguir[open] > summary { margin-botto
 .boton-buscar:hover { color: var(--texto); border-color: var(--texto-suave); }
 .boton-buscar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .buscar-texto { display: none; }
-@media (min-width: 1400px) {
+@media (min-width: 860px) {
+  .boton-buscar { height: 2.25rem; min-width: 2.25rem; }
+}
+@media (min-width: 1000px) {
   .boton-buscar { padding: 0 0.45rem 0 0.75rem; }
   .buscar-texto { display: inline; }
 }
@@ -1393,3 +1402,133 @@ a.entidad:hover { color: var(--acento); }
 .tarjeta-palabra .oracion { margin: 0 0 0.9rem; font-style: italic; color: var(--texto-suave); }
 .tarjeta-palabra .significado .cuerpo { margin: 0 0 1rem; font-size: 1.02rem; }
 .tarjeta-palabra .significado[hidden] { display: none; }
+
+/* ---------- Explorar y Biblioteca: los grupos de un destino, arriba de sus subpestañas ---------- */
+
+.grupos { display: flex; flex-wrap: wrap; align-items: center; gap: 0.35rem; margin: 0 0 0.35rem; }
+.grupos a {
+  padding: 0.4rem 0.85rem;
+  border: 1px solid var(--borde);
+  border-radius: 999px;
+  background: var(--superficie);
+  color: var(--texto-suave);
+  font: 500 0.9rem var(--sans);
+  text-decoration: none;
+}
+.grupos a:hover { color: var(--texto); }
+.grupos a[aria-current="page"] { background: var(--texto); border-color: var(--texto); color: var(--fondo); font-weight: 600; }
+.grupos .meta { margin-left: auto; font-size: 0.8rem; letter-spacing: 0.04em; }
+main > .grupos { margin-bottom: 1rem; }
+
+/* ---------- Hoy en una sola página: lo principal y un bloque por sector, Colombia y cada región ---------- */
+
+/* Los saltos a cada parte de la página. */
+.saltos { display: flex; gap: 0.4rem; overflow-x: auto; scrollbar-width: none; margin: 0.9rem -16px 0; padding: 0 16px; }
+.saltos::-webkit-scrollbar { display: none; }
+.saltos .chip { padding: 0.35rem 0.8rem; font-size: 0.85rem; color: var(--texto-suave); }
+.saltos .chip:hover { color: var(--texto); }
+
+/* Las cifras de Colombia que se miran a diario: el valor, cuánto se movió y frente a qué fecha. */
+/* En el celular, una fila que se desliza, para que la primera noticia quede en la primera pantalla. */
+.cifras-hoy {
+  display: flex;
+  gap: 1.4rem;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0 -16px 0.9rem;
+  padding: 0.7rem 16px;
+  border-top: 1px solid var(--borde);
+  border-bottom: 1px solid var(--borde);
+  color: var(--texto);
+  text-decoration: none;
+}
+.cifras-hoy::-webkit-scrollbar { display: none; }
+.cifras-hoy:hover .cifra-nombre { color: var(--texto); }
+.cifra { flex: none; display: flex; flex-direction: column; gap: 0.05rem; }
+.cifra-nombre { font-size: 0.75rem; color: var(--texto-suave); white-space: nowrap; }
+.cifra-valor { font: 600 1.15rem/1.25 var(--sans); white-space: nowrap; }
+.cifra-unidad { font-size: 0.78rem; font-weight: 500; color: var(--texto-suave); }
+.cifra-cambio { font-size: 0.72rem; color: var(--texto-suave); white-space: nowrap; }
+@media (min-width: 700px) {
+  .cifras-hoy { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem 1.25rem; margin: 0 0 1rem; padding: 0.8rem 0; overflow: visible; }
+  .cifra { min-width: 0; }
+  .cifra-valor { font-size: 1.25rem; }
+  .cifra-nombre, .cifra-cambio { white-space: normal; }
+}
+
+/* "Desde tu última visita": una línea debajo de las cifras, que se abre ahí mismo. */
+.hoy details.al-dia { margin: 0 0 1.4rem; border: 0; border-radius: 0; background: none; box-shadow: none; }
+.hoy details.al-dia > summary { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 0.15rem 0.5rem; padding: 0.15rem 0 0.15rem 1.1rem; font-size: 0.9rem; }
+.hoy details.al-dia > summary::before { left: 0; top: 0.15rem; }
+.hoy .al-dia-titulo { font-weight: 600; }
+.hoy .al-dia-cuerpo { padding: 0.75rem 0 0.25rem 1.1rem; }
+
+/* Cada parte de Hoy lleva un rótulo con una marca de color; el nombre siempre va al lado. */
+.parte-hoy { margin: 0 0 2.25rem; scroll-margin-top: 4.75rem; }
+#hoy-profundizar { scroll-margin-top: 4.75rem; }
+.rotulo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.35rem;
+  font: 700 0.8rem var(--sans);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--texto);
+}
+.rotulo::before { content: ""; flex: none; width: 0.7rem; height: 0.7rem; border-radius: 3px; background: var(--tono-principal); }
+.rotulo-sectores::before { background: var(--tono-sectores); }
+.rotulo-colombia::before { background: var(--tono-colombia); }
+.rotulo-mundo::before { background: var(--tono-mundo); }
+#hoy-principal .relevante { margin-bottom: 0; }
+
+/* Un bloque: tres noticias a la vista, las demás ahí mismo y un enlace a su página. */
+.bloque-hoy { margin: 0 0 1.5rem; }
+.bloque-hoy:last-child { margin-bottom: 0; }
+.bloque-titulo { margin: 1.1rem 0 0.2rem; font: 600 1.1rem/1.3 var(--serif); }
+.bloque-hoy .noticias { border-top: 1px solid var(--borde); }
+.bloque-nota { margin: 0 0 0.4rem; }
+.mas-del-bloque { margin-top: 0; }
+.mas-del-bloque > summary { padding: 0.65rem 0; font-size: 0.9rem; font-weight: 600; }
+.mas-del-bloque > .noticias { margin-top: 0; }
+.bloque-todo { display: inline-block; padding: 0.6rem 0 0; font-size: 0.85rem; font-weight: 600; color: var(--texto-suave); text-decoration: none; }
+.bloque-todo:hover { color: var(--acento); }
+.sin-novedades { margin: 0.75rem 0 0; }
+.sin-novedades a { text-decoration: underline; text-decoration-color: var(--borde); text-underline-offset: 2px; }
+
+/* La primera de lo principal pesa más que las demás, si su titular es corto. */
+.relevante details.noticia.primera .noticia-titulo { font-size: 1.4rem; line-height: 1.28; font-weight: 600; }
+
+/* ---------- La noticia: titular corto, bajada y, al abrirla, lo justo ---------- */
+
+.noticia-bajada { color: var(--texto-suave); font-size: 0.95rem; line-height: 1.45; }
+.noticia-meta .insignia-tipo { margin-right: 0; }
+.importa { margin: 0 0 0.75rem; padding: 0.55rem 0.8rem; border-left: 3px solid var(--acento); background: var(--acento-suave); border-radius: 0 8px 8px 0; font-size: 0.95rem; line-height: 1.5; }
+.importa.destacado { margin: 1.1rem 0 0; padding: 0.75rem 1rem; font-size: 1rem; }
+.resumen-noticia { margin: 0 0 0.75rem; font-family: var(--serif); font-size: 1.05rem; line-height: 1.6; }
+.noticia-cuerpo { max-width: 38rem; }
+.noticia-cuerpo .preguntar { margin: 0 0 0.6rem; }
+/* Lo relevante de una subpestaña ya no va numerado: el número queda para lo principal de Hoy. */
+.destacadas .noticia-titulo { font-size: 1.15rem; }
+
+/* ---------- La historia: lo esencial arriba; las piezas y la línea de tiempo, plegadas ---------- */
+
+/* La columna de lectura no pasa de unos 70 caracteres por línea. */
+.historia-completa .principal > header,
+.historia-completa .principal > section,
+.historia-completa .principal > .importa { max-width: 36rem; }
+.historia-completa h1.titular-largo { font-size: clamp(1.35rem, 4.6vw, 1.7rem); line-height: 1.25; }
+.historia-completa .bajada { margin: 0.5rem 0 0.4rem; font-family: var(--serif); font-size: 1.15rem; line-height: 1.45; color: var(--texto-suave); }
+.historia-completa header .meta { margin: 0.5rem 0 0; }
+.historia-completa .acciones-lectura { margin-top: 0.75rem; }
+.historia-completa details.mas { margin-top: 0.5rem; }
+.historia-completa details.mas > summary { font-size: 0.9rem; font-weight: 600; }
+
+/* ---------- Dedos: en pantallas táctiles, lo que se toca mide al menos 40 px ---------- */
+
+@media (pointer: coarse) {
+  .chip, .grupos a, .filtros-pestana .chip { min-height: 2.5rem; display: inline-flex; align-items: center; }
+  .pestanas a { padding-top: 0.8rem; padding-bottom: 0.8rem; }
+  details.mas > summary, .bloque-todo, .volver { min-height: 2.5rem; display: flex; align-items: center; }
+  .boton-secundario { min-height: 2.5rem; }
+}
