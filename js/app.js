@@ -1,5 +1,5 @@
 // Mentor: la interfaz de lectura. Una sola página con vistas por dirección
-// (#/hoy, #/geografia, #/areas, #/sectores, #/p/…, #/h/…, #/leer/…, #/para-leer, #/cuaderno, #/repaso, #/estado…).
+// (#/principal, #/todo, #/leer/…, #/para-leer, #/cuaderno, #/repaso, #/estado…; y lo anterior: #/hoy, #/geografia, #/p/…, #/h/…).
 import { buscar, impulsoDeHistoria, normalizar } from "./buscador.js";
 import { ErrorDeDatos, REPO_POR_DEFECTO, alActualizar, borrarConfig, config, guardarConfig, laVistaUsa, leerJSON, leerTexto, modoLocal,
   nuevaVista, tenerListo } from "./datos.js";
@@ -352,7 +352,8 @@ async function vistaLector(ruta) {
   marcar({ tipo: "abierto", archivo: ruta });
   pintar(html`
     <article class="lector" data-archivo="${ruta}" data-titulo="${ficha.titulo}">
-      ${deLaBiblioteca ? html`<a class="volver" href="#/para-leer">← Para leer</a>` : html`<a class="volver" href="#/hoy">← Hoy</a>`}
+      ${deLaBiblioteca ? html`<a class="volver" href="#/para-leer">← Para leer</a>`
+        : html`<a class="volver" href="${titularesDesde}">← ${titularesDesde === "#/todo" ? "Todo lo demás" : "Principal"}</a>`}
       <header>
         <p class="sobretitulo">${ficha.fuente}${ficha.categoria_inicial ? ` · ${ficha.categoria_inicial}` : ""}</p>
         <h1>${ficha.titulo}</h1>
@@ -1768,7 +1769,7 @@ async function vistaConectar() {
     }
     try {
       await leerJSON("datos/indice/ultima.json");
-      location.hash = "#/hoy";
+      location.hash = "#/principal";
     } catch (e) {
       borrarConfig();
       error.textContent = e instanceof ErrorDeDatos && [401, 403, 404].includes(e.estado)
@@ -2652,7 +2653,8 @@ function indiceDelBuscador() {
 }
 
 const IR_A = [
-  ["Hoy", "#/hoy", "inicio portada relevante"], ["Seguimiento", "#/seguimiento", "historias que sigo linea de tiempo"],
+  ["Principal", "#/principal", "inicio portada titulares hoy negocios"], ["Todo lo demás", "#/todo", "titulares escaneo todas las noticias secciones"],
+  ["Hoy anterior", "#/hoy", "relevante hasta el 20 de noviembre"], ["Seguimiento", "#/seguimiento", "historias que sigo linea de tiempo"],
   ["Geografía", "#/geografia", "paises regiones mundo"], ["Áreas", "#/areas", "temas"], ["Sectores", "#/sectores", "radar negocios"],
   ["Para leer", "#/para-leer", "lecturas biblioteca libros cola guardadas"], ["Para ver", "#/para-ver", "videos cursos documentales youtube canales"],
   ["Cuaderno", "#/cuaderno", "preguntas vocabulario frases claude conversaciones"], ["Repaso", "#/repaso", "tutor aprender recordar palabras"],
@@ -2869,9 +2871,9 @@ async function vistaBuscar(consulta) {
 // En el computador: buscar, bajar y subir por las noticias, abrirlas, seguirlas, preguntar,
 // escuchar y saltar entre secciones sin el ratón. No actúan mientras se escribe.
 
-const IR_CON_G = { h: "#/hoy", s: "#/seguimiento", g: "#/geografia", a: "#/areas", e: "#/sectores", l: "#/para-leer",
+const IR_CON_G = { h: "#/principal", d: "#/todo", s: "#/seguimiento", g: "#/geografia", a: "#/areas", e: "#/sectores", l: "#/para-leer",
   v: "#/para-ver", c: "#/cuaderno", r: "#/repaso", f: "#/fuentes", t: "#/estado" };
-const NAVEGABLES = "details.noticia, .seguida, .lectura, .lista-profundizar > li, .hilo, .frase, .lista-compacta > li";
+const NAVEGABLES = "li.tl, details.noticia, .seguida, .lectura, .lista-profundizar > li, .hilo, .frase, .lista-compacta > li";
 // Cada atajo: sus teclas, lo que va entre ellas y lo que hace.
 const ATAJOS = [
   [["Ctrl", "K"], "+", "Buscar, ir a cualquier sección o dejarle algo a Claude (también con /)"],
@@ -2882,7 +2884,7 @@ const ATAJOS = [
   [["p"], "", "Preguntarle a Claude sobre la historia marcada, o sobre lo que tienes abierto"],
   [["e"], "", "Escuchar lo que tienes en pantalla; si ya suena, pausar o seguir"],
   [["[", "]"], "o", "Subpestaña anterior o siguiente"],
-  [["g", "h"], "y luego", "Ir a Hoy. Con g y otra letra: s Seguimiento, g Geografía, a Áreas, e Sectores, l Para leer, v Para ver, c Cuaderno, r Repaso, f Fuentes, t Estado"],
+  [["g", "h"], "y luego", "Ir a Principal. Con g y otra letra: d Todo lo demás, l Para leer, v Para ver, c Cuaderno, r Repaso, f Fuentes, t Estado"],
   [["1", "4"], "a", "En el Repaso, responder con la opción de ese número"],
   [["?"], "", "Esta ayuda"],
 ];
@@ -2967,7 +2969,130 @@ document.addEventListener("keydown", (evento) => {
   evento.preventDefault();
 });
 
+// ---------- Titulares: Principal y Todo lo demás ----------
+// Desde el 21 de noviembre de 2026 las arma cada noche scripts/titulares.py, sin IA. Principal lleva lo
+// que toca tus negocios, lo que cuentan varios medios, lo principal de Colombia y de América Latina y las
+// lecturas largas; Todo lo demás, el resto por sección, para pasarlo rápido. Cada titular abre el texto
+// guardado en el lector.
+
+const BLOQUES_PRINCIPAL = [
+  ["negocios", "Tus negocios", "Lo de las fuentes de tus sectores y lo que los nombra en el titular."],
+  ["del_dia", "Lo del día", "Lo que cuentan tres medios o más."],
+  ["colombia", "Colombia", "Primero lo que cuentan varios medios colombianos."],
+  ["america_latina", "América Latina", "Lo que cuentan medios de dos países o más."],
+  ["lecturas", "Lecturas largas", "Blogs, boletines y revistas de autor."],
+];
+const CLAVE_TODO_ABIERTAS = "mentor.todo.abiertas"; // las secciones de Todo que dejaste abiertas, en este navegador
+let titularesDesde = "#/principal"; // a dónde vuelve el lector
+
+// Los titulares del día de la última recolección; si ese día no se armaron, los del anterior.
+async function leerTitulares(parte) {
+  const { fecha } = await leerJSON("datos/indice/ultima.json");
+  for (let atras = 0; ; atras++) {
+    const dia = diaEnBogota(new Date(Date.parse(`${fecha}T12:00:00-05:00`) - atras * 864e5));
+    try {
+      return await leerJSON(`datos/titulares/${dia.slice(0, 4)}/${dia.slice(5, 7)}/${dia.slice(8, 10)}-${parte}.json`);
+    } catch (error) {
+      if (!(error instanceof ErrorDeDatos && error.estado === 404) || atras >= 3) throw error;
+    }
+  }
+}
+
+// Lo que ya abriste en el lector en los últimos días: sale en gris, para que el ojo pase de largo.
+async function piezasAbiertas() {
+  const marcas = await todasLasMarcas();
+  return new Set(marcas.filter((m) => m.tipo === "abierto" || m.tipo === "leido").map((m) => m.archivo));
+}
+
+function lineaTitular(b, vistos) {
+  const otras = b.otras || [];
+  const visto = [b, ...otras].some((x) => vistos.has(x.a));
+  const cuantas = b.n > 1 ? `Lo cuentan ${b.n} medios` : `${otras.length + 1} piezas de ${b.f}`;
+  return html`<li class="tl${visto ? " tl-visto" : ""}">
+    <a class="tl-titulo" href="${enlaceLector({ archivo: b.a })}" lang="${b.i || "es"}">${visto ? html`<span class="leido" title="Ya la abriste">✓</span>` : ""}${b.t}</a>
+    <span class="meta">${b.f} · ${b.m} min${b.x ? " · solo el extracto" : ""}</span>
+    ${otras.length ? html`<details class="tl-otras"><summary>${cuantas}</summary><ul>${otras.map((o) => html`<li>
+      <a href="${enlaceLector({ archivo: o.a })}" lang="${o.i || "es"}">${o.t}</a> <span class="meta">${o.f}</span></li>`)}</ul></details>` : ""}
+  </li>`;
+}
+
+async function vistaPrincipal() {
+  const [p, vistos] = await Promise.all([leerTitulares("principal"), piezasAbiertas()]);
+  titularesDesde = "#/principal";
+  const cuantos = BLOQUES_PRINCIPAL.reduce((n, [clave]) => n + (clave === "negocios"
+    ? p.negocios.reduce((m, s) => m + s.titulares.length, 0) : p[clave].length), 0);
+  pintar(html`
+    <header class="encabezado-vista">
+      <p class="sobretitulo">${fechaLarga(p.dia)}</p>
+      <h1>Principal</h1>
+      <p class="meta">${numero(cuantos)} titulares de ${numero(p.piezas)} piezas recolectadas · <a href="#/todo">Todo lo demás</a></p>
+    </header>
+    ${BLOQUES_PRINCIPAL.map(([clave, nombre, explicacion]) => (p[clave]?.length ? html`<section class="tl-bloque">
+      <h2>${nombre}</h2><p class="meta tl-explicacion">${explicacion}</p>
+      ${clave === "negocios"
+        ? p.negocios.map((s) => html`<h3 class="tl-sector">${s.sector}</h3><ol class="tl-lista">${s.titulares.map((b) => lineaTitular(b, vistos))}</ol>`)
+        : html`<ol class="tl-lista">${p[clave].map((b) => lineaTitular(b, vistos))}</ol>`}
+    </section>` : ""))}
+    <p class="nota tl-antes">Hoy, Geografía, Áreas, Sectores y Seguimiento quedaron como estaban el 20 de noviembre, cuando se
+      pausó la parte con Claude. <a href="#/hoy">Ver lo anterior</a></p>
+  `);
+  marcarVisita("principal");
+}
+
+async function vistaTodo() {
+  const [t, vistos] = await Promise.all([leerTitulares("todo"), piezasAbiertas()]);
+  titularesDesde = "#/todo";
+  // La primera vez, Colombia abierta; después, las que dejaste abiertas.
+  let abiertas = new Set(["Colombia"]);
+  try { abiertas = new Set(JSON.parse(localStorage.getItem(CLAVE_TODO_ABIERTAS)) ?? ["Colombia"]); } catch { /* sin almacenamiento */ }
+  const total = t.secciones.reduce((n, s) => n + s.titulares.length, 0);
+  pintar(html`
+    <header class="encabezado-vista">
+      <p class="sobretitulo">${fechaLarga(t.dia)}</p>
+      <h1>Todo lo demás</h1>
+      <p class="meta">${numero(total)} titulares en ${t.secciones.length} secciones, sin lo que ya está en <a href="#/principal">Principal</a>.</p>
+      <label class="buscador tl-filtro"><span class="oculto">Filtrar los titulares</span>
+        <input id="filtro-todo" type="search" autocomplete="off" placeholder="Filtrar: Petro, Nvidia, litio…">
+      </label>
+    </header>
+    <div id="secciones-todo">${t.secciones.map((s) => html`<details class="seccion tl-seccion" data-seccion="${s.seccion}" data-total="${s.titulares.length}"${abiertas.has(s.seccion) ? seguro(" open") : ""}>
+      <summary><span class="seccion-titulo">${s.seccion}</span><span class="meta tl-cuenta">${numero(s.titulares.length)}</span></summary>
+      <div class="seccion-cuerpo"><ol class="tl-lista tl-compacta">${s.titulares.map((b) => lineaTitular(b, vistos))}</ol></div>
+    </details>`)}</div>
+    <p class="nota" id="sin-coincidencias" hidden>Nada coincide con el filtro.</p>
+  `);
+  const caja = document.getElementById("secciones-todo");
+  let filtrando = false;
+  // Las secciones que abres o cierras quedan así para la próxima vez (no mientras filtras).
+  caja.addEventListener("toggle", (evento) => {
+    if (filtrando || !evento.target.matches?.(".tl-seccion")) return;
+    if (evento.target.open) abiertas.add(evento.target.dataset.seccion);
+    else abiertas.delete(evento.target.dataset.seccion);
+    try { localStorage.setItem(CLAVE_TODO_ABIERTAS, JSON.stringify([...abiertas])); } catch { /* sin almacenamiento */ }
+  }, true);
+  let items = null;
+  const filtro = document.getElementById("filtro-todo");
+  filtro.addEventListener("input", () => {
+    items ??= [...caja.querySelectorAll("li.tl")].map((li) => [li, sinTildes(li.textContent)]);
+    const consulta = sinTildes(filtro.value.trim());
+    filtrando = Boolean(consulta);
+    for (const [li, texto] of items) li.hidden = filtrando && !texto.includes(consulta);
+    let alguna = false;
+    for (const seccion of caja.querySelectorAll(".tl-seccion")) {
+      const visibles = seccion.querySelectorAll("li.tl:not([hidden])").length;
+      seccion.hidden = filtrando && !visibles;
+      seccion.open = filtrando ? visibles > 0 : abiertas.has(seccion.dataset.seccion);
+      seccion.querySelector(".tl-cuenta").textContent = numero(filtrando ? visibles : Number(seccion.dataset.total));
+      alguna ||= visibles > 0;
+    }
+    document.getElementById("sin-coincidencias").hidden = !filtrando || alguna;
+  });
+  marcarVisita("todo");
+}
+
 const VISTAS = {
+  principal: vistaPrincipal,
+  todo: vistaTodo,
   hoy: vistaHoyV2,
   buscar: vistaBuscar,
   repaso: vistaRepaso,
@@ -2992,7 +3117,7 @@ const VISTAS = {
 // Las vistas que usan el ancho del computador; las demás quedan en una columna de lectura.
 const VISTAS_ANCHAS = new Set(["hoy", "buscar", "geografia", "areas", "sectores", "p", "h", "e"]);
 // Qué sección de la barra se ilumina en las vistas que no tienen la suya.
-const NAVEGACION_DE = { leer: "hoy", nuevo: "hoy", buscar: "hoy", vocabulario: "cuaderno", repaso: "cuaderno" };
+const NAVEGACION_DE = { leer: "principal", nuevo: "principal", buscar: "principal", vocabulario: "cuaderno", repaso: "cuaderno" };
 
 const posiciones = {};
 let rutaActual = null;
@@ -3056,16 +3181,16 @@ function marcarVisita(pagina) {
 }
 
 async function enrutar() {
-  const [nombre = "hoy", ...resto] = location.hash.replace(/^#\/?/, "").split("/");
+  const [nombre = "principal", ...resto] = location.hash.replace(/^#\/?/, "").split("/");
   if (rutaActual) posiciones[rutaActual] = window.scrollY;
-  rutaActual = location.hash || "#/hoy";
+  rutaActual = location.hash || "#/principal";
   empezadaEn = Date.now();
 
   if (!modoLocal() && !config().token && nombre !== "conectar") {
     location.hash = "#/conectar";
     return;
   }
-  const vista = VISTAS[nombre] ? nombre : "hoy";
+  const vista = VISTAS[nombre] ? nombre : "principal";
   resaltar(NAVEGACION_DE[vista] || vista);
   contenido.classList.toggle("amplio", VISTAS_ANCHAS.has(vista));
   contenido.onclick = null;

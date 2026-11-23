@@ -1393,3 +1393,49 @@ a.entidad:hover { color: var(--acento); }
 .tarjeta-palabra .oracion { margin: 0 0 0.9rem; font-style: italic; color: var(--texto-suave); }
 .tarjeta-palabra .significado .cuerpo { margin: 0 0 1rem; font-size: 1.02rem; }
 .tarjeta-palabra .significado[hidden] { display: none; }
+
+/* ---------- Titulares: Principal y Todo lo demás ---------- */
+
+.tl-bloque { margin: 0 0 2rem; }
+.tl-bloque > h2 { font-size: 1.35rem; margin: 0 0 0.1rem; }
+.tl-explicacion { margin: 0 0 0.4rem; }
+.tl-sector {
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--texto-suave);
+  margin: 1rem 0 0.1rem;
+}
+.tl-lista { list-style: none; margin: 0; padding: 0; }
+.tl { padding: 0.55rem 0; border-top: 1px solid var(--borde); }
+.tl-lista > .tl:first-child { border-top: 0; }
+.tl-titulo {
+  display: block;
+  color: var(--texto);
+  text-decoration: none;
+  font-family: var(--serif);
+  font-size: 1.05rem;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.tl-titulo:hover { color: var(--acento); }
+.tl-visto .tl-titulo { color: var(--texto-suave); }
+.tl > .meta { display: block; margin-top: 0.1rem; }
+.tl-compacta .tl { padding: 0.4rem 0; }
+.tl-compacta .tl-titulo { font-size: 0.98rem; }
+.tl-otras { border-top: 0; padding: 0; margin-top: 0.15rem; }
+.tl-otras > summary { list-style: none; cursor: pointer; display: inline-block; font-size: 0.8rem; font-weight: 600; color: var(--acento); }
+.tl-otras > summary::-webkit-details-marker { display: none; }
+.tl-otras > summary::before { content: "+ "; }
+.tl-otras[open] > summary::before { content: "− "; }
+.tl-otras ul { list-style: none; margin: 0.3rem 0 0.2rem; padding: 0 0 0 0.8rem; border-left: 2px solid var(--borde); }
+.tl-otras li { padding: 0.2rem 0; font-size: 0.92rem; line-height: 1.35; overflow-wrap: anywhere; }
+.tl-otras li a { color: var(--texto); text-decoration: none; }
+.tl-otras li a:hover { color: var(--acento); }
+.tl-filtro { margin: 0.9rem 0 0; }
+.tl-seccion .seccion-cuerpo { padding-top: 0; }
+.tl-seccion[hidden] { display: none; }
+.tl[hidden] { display: none; }
+.tl-antes { margin-top: 2.5rem; }
