@@ -2273,9 +2273,12 @@ contenido.addEventListener("toggle", (evento) => {
 const PALABRAS_POR_MINUTO = 220;
 
 async function vistaHoyV2() {
-  const [inicio, indice, { visitas, leidas }, guardadas, , , marcas] = await Promise.all([
+  const [inicio, indice, { visitas, leidas }, guardadas, , , marcas, ultima] = await Promise.all([
     leerJSON("datos/v2/inicio.json"), leerJSON("datos/v2/indice.json"), marcasV2(), piezasGuardadas(), cargarHilosPorHistoria(),
-    leerSeguimiento(), todasLasMarcas()]);
+    leerSeguimiento(), todasLasMarcas(), leerJSON("datos/indice/ultima.json").catch(() => null)]);
+  // Desde el 20-nov-2026 esta página no se escribe (la parte con Claude está en pausa): si quedó atrás de la
+  // última recolección, lo dice arriba y lleva a Principal, que sí es del día.
+  const atrasada = ultima?.fecha && inicio.dia < ultima.fecha;
   const paginas = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t]));
   const nombres = Object.fromEntries(indice.paginas.map((t) => [t.pagina, t.nombre]));
   const relevante = inicio.relevante;
@@ -2287,6 +2290,8 @@ async function vistaHoyV2() {
   pintar(html`
     <div class="dos-columnas">
       <div class="principal">
+        ${atrasada ? html`<p class="aviso aviso-atrasada">Esta es la página de antes: quedó como estaba el ${fechaLarga(inicio.dia)},
+          cuando se pausó la parte con Claude. Lo de hoy está en Principal. <a href="#/principal">Ir a Principal</a></p>` : ""}
         <header class="encabezado-vista">
           <p class="sobretitulo">${fechaLarga(inicio.dia)}</p>
           <div class="titulo-con-acciones"><h1>Lo relevante hoy</h1>${relevante.length ? botonEscuchar() : ""}</div>
@@ -2637,7 +2642,7 @@ function vistaNuevo(ruta) {
   const [tipo, ...resto] = (ruta || "").split("/");
   const valor = resto.join("/");
   const grupo = Object.entries(GRUPOS).find(([, g]) => g === valor)?.[0] || (valor === "Temas" ? "areas" : null);
-  const destino = tipo === "g" && grupo ? `#/${grupo}` : ["p", "h", "e"].includes(tipo) ? `#/${tipo}/${encodeURIComponent(valor)}` : "#/hoy";
+  const destino = tipo === "g" && grupo ? `#/${grupo}` : ["p", "h", "e"].includes(tipo) ? `#/${tipo}/${encodeURIComponent(valor)}` : "#/principal";
   location.replace(destino);
 }
 
@@ -2861,9 +2866,9 @@ paleta.addEventListener("click", (evento) => {
 });
 document.getElementById("boton-buscar")?.addEventListener("click", () => abrirPaleta());
 
-// #/buscar/<lo que sea>: Hoy de fondo y el buscador abierto con eso escrito.
+// #/buscar/<lo que sea>: Principal de fondo y el buscador abierto con eso escrito.
 async function vistaBuscar(consulta) {
-  await vistaHoyV2();
+  await vistaPrincipal();
   abrirPaleta(consulta || "");
 }
 

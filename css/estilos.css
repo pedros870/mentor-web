@@ -748,6 +748,9 @@ progress.gasto::-moz-progress-bar { background: var(--acento); border-radius: 99
 .tabla table { border-collapse: collapse; font-family: var(--sans); font-size: 0.9rem; }
 .tabla th, .tabla td { border: 1px solid var(--borde); padding: 0.35em 0.6em; text-align: left; }
 
+.aviso-atrasada { margin: var(--e4) 0 0; line-height: 1.5; }
+.aviso-atrasada a { color: inherit; font-weight: 600; white-space: nowrap; }
+
 .pie-lector { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--borde); }
 .tambien li { display: inline; margin-right: 0.75rem; }
 
