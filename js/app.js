@@ -2189,7 +2189,7 @@ function resaltarSonando(selector) {
   if (!el) return;
   el.classList.add("sonando");
   const caja = el.getBoundingClientRect();
-  if (caja.top < 90 || caja.bottom > window.innerHeight - 140) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  if (caja.top < 90 || caja.bottom > window.innerHeight - 140) el.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 }
 
 // Los párrafos de un texto en Markdown, sin marcas, para leerlos en voz alta.
@@ -2914,7 +2914,7 @@ function moverFoco(paso) {
   actual?.classList.remove("enfocada");
   siguiente.classList.add("enfocada");
   (siguiente.querySelector(":scope > summary, a, button") || siguiente).focus({ preventScroll: true });
-  siguiente.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  siguiente.scrollIntoView({ block: "nearest", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
 }
 
 function preguntarSobreLaMarcada(actual) {
@@ -2998,10 +2998,11 @@ async function piezasAbiertas() {
   return new Set(marcas.filter((m) => m.tipo === "abierto" || m.tipo === "leido").map((m) => m.archivo));
 }
 
-function fechaConDia(iso) {
-  const texto = new Intl.DateTimeFormat("es-CO", { weekday: "long", day: "numeric", month: "long", year: "numeric",
-    timeZone: "America/Bogota" }).format(new Date(`${iso}T12:00:00-05:00`));
-  return texto.charAt(0).toUpperCase() + texto.slice(1);
+// La fecha del cabezal, como la de un periódico: "Martes 24 de noviembre".
+function fechaDelDia(iso) {
+  const partes = Object.fromEntries(new Intl.DateTimeFormat("es-CO", { weekday: "long", day: "numeric", month: "long",
+    timeZone: "America/Bogota" }).formatToParts(new Date(`${iso}T12:00:00-05:00`)).map((p) => [p.type, p.value]));
+  return `${partes.weekday.charAt(0).toUpperCase()}${partes.weekday.slice(1)} ${partes.day} de ${partes.month}`;
 }
 
 const marcaVista = html`<span class="marca-vista" title="Ya la abriste" aria-label="Ya la abriste">✓</span>`;
@@ -3019,46 +3020,64 @@ function otrosTitulares(otras, vistos, { desde = 0, texto } = {}) {
     <ul>${resto.map((o) => html`<li>${enlaceTitular(o, vistos, "")}<span class="otra-fuente">${o.f}</span></li>`)}</ul></details>`;
 }
 
-// Los medios que también la cuentan, por su nombre: "también BBC News, Le Monde y 4 más".
+// Los medios que también la cuentan, por su nombre: "También en BBC News, Le Monde y 4 más".
 function tambienEn(b, cuantos) {
   const medios = [...new Set((b.otras || []).map((o) => o.f))].filter((f) => f !== b.f);
   if (!medios.length) return "";
   const nombrados = medios.slice(0, cuantos);
   const resto = medios.length - nombrados.length;
-  return ` · también ${nombrados.join(", ")}${resto ? ` y ${resto} más` : ""}`;
+  return html`<span class="tambien-en">También en ${nombrados.join(", ")}${resto ? ` y ${resto} más` : ""}</span>`;
 }
 
-function cobertura(n) {
-  return html`<span class="cobertura" title="Lo cuentan ${n} medios"><span class="cobertura-n">${n}</span><span class="cobertura-l">medios</span></span>`;
+// La cobertura en palotes: una raya por medio, en grupos de cinco, como se cuenta a mano. Bajando por
+// Lo del día, los palotes dibujan el tamaño de cada noticia.
+const MAXIMO_DE_PALOTES = 20;
+function palotes(n) {
+  const cuantos = Math.max(1, Math.min(n, MAXIMO_DE_PALOTES));
+  const x = (i) => i * 5 + Math.floor(i / 5) * 3;
+  return html`<svg class="palotes" viewBox="0 0 ${x(cuantos - 1) + 3} 16" aria-hidden="true" focusable="false">${
+    Array.from({ length: cuantos }, (_, i) => html`<rect x="${x(i)}" width="3" height="16" rx="1"/>`)}</svg>`;
 }
 
-// Lo del día: la de más cobertura va en grande, con tres de sus otros titulares a la vista.
-function itemDelDia(b, vistos, destacada) {
+function cobertura(b) {
+  const medios = [...new Set([b.f, ...(b.otras || []).map((o) => o.f)])];
+  return html`<span class="cobertura" title="${medios.join(", ")}">${palotes(b.n)}<span class="cobertura-n">${b.n} medios</span></span>`;
+}
+
+// Lo del día en tres niveles: la de más cobertura en grande, con los medios que también la cuentan y
+// cinco de sus otros titulares a la vista; las tres siguientes a su lado, y el resto en filas de tres.
+// Los nombres de los medios de las demás salen al pasar el ratón por los palotes y al abrir sus titulares.
+const OTRAS_A_LA_VISTA = 5;
+// El desplegable de los otros titulares va en la misma línea (al final del medio y los minutos, o detrás
+// del titular en Todo) y la lista se abre debajo: un renglón menos por noticia.
+function itemDelDia(b, vistos, nivel) {
   const otras = b.otras || [];
-  return html`<li class="dia-item${destacada ? " dia-lead" : ""}${yaVista(b, vistos) ? " visto" : ""}">
-    ${cobertura(b.n)}
-    <div class="dia-cuerpo">
-      ${enlaceTitular(b, vistos)}
-      <p class="fila-meta"><span class="medio">${b.f}</span> · ${b.m} min${b.x ? " · solo el extracto" : ""}${tambienEn(b, destacada ? 5 : 3)}</p>
-      ${destacada && otras.length ? html`<ul class="dia-otras">${otras.slice(0, 3).map((o) => html`<li>${enlaceTitular(o, vistos, "")}<span class="otra-fuente">${o.f}</span></li>`)}</ul>` : ""}
-      ${otrosTitulares(otras, vistos, { desde: destacada ? 3 : 0 })}
-    </div>
+  const lead = nivel === "lead";
+  return html`<li class="dia-item dia-${nivel}${yaVista(b, vistos) ? " visto" : ""}">
+    ${cobertura(b)}
+    ${enlaceTitular(b, vistos)}
+    <div class="fila-meta"><span class="medio">${b.f}</span><span class="minutos">${b.m} min</span>${b.x ? html`<span>solo el extracto</span>` : ""}${
+      lead ? tambienEn(b, 6) : otrosTitulares(otras, vistos)}</div>
+    ${lead && otras.length ? html`<ul class="dia-otras">${otras.slice(0, OTRAS_A_LA_VISTA).map((o) => html`<li>${enlaceTitular(o, vistos, "")}<span class="otra-fuente">${o.f}</span></li>`)}</ul>` : ""}
+    ${lead ? otrosTitulares(otras, vistos, { desde: OTRAS_A_LA_VISTA }) : ""}
   </li>`;
 }
 
-// Una fila: el titular y, debajo, el medio y los minutos. En Todo (densa), el medio y los minutos van en
-// sus propias columnas para que el ojo baje solo por los titulares.
-function filaTitular(b, vistos, { densa = false } = {}) {
+// Una fila: el titular y, debajo, el medio, los minutos, cuántos medios la cuentan y el desplegable. En
+// Todo (densa) van en columnas: el medio a la izquierda, una sola vez por tramo (repite), para que el ojo
+// baje solo por los titulares; la cobertura y el desplegable siguen al titular.
+function filaTitular(b, vistos, { densa = false, repite = false } = {}) {
   const otras = b.otras || [];
-  return html`<li class="fila${densa ? " densa" : ""}${yaVista(b, vistos) ? " visto" : ""}">
-    <span class="fila-titular">${enlaceTitular(b, vistos)}${b.n > 1 ? html` <span class="cobertura-chica">${b.n} medios</span>` : ""}</span>
-    <span class="fila-meta"><span class="medio">${b.f}</span><span class="minutos">${b.m} min${b.x ? " · extracto" : ""}</span></span>
-    ${otrosTitulares(otras, vistos, { texto: b.n > 1 ? undefined : `${otras.length + 1} piezas de ${b.f}` })}
+  const desplegable = otrosTitulares(otras, vistos, { texto: b.n > 1 ? undefined : `${otras.length + 1} piezas de ${b.f}` });
+  const chica = b.n > 1 ? html`<span class="cobertura-chica" title="Lo cuentan ${b.n} medios">${palotes(b.n)}${b.n} medios</span>` : "";
+  return html`<li class="fila${densa ? " densa" : ""}${repite ? " repite" : ""}${yaVista(b, vistos) ? " visto" : ""}">
+    <div class="fila-titular">${enlaceTitular(b, vistos)}${densa ? html` ${chica}${desplegable}` : ""}</div>
+    <div class="fila-meta"><span class="medio">${b.f}</span><span class="minutos">${b.m} min${b.x ? " · extracto" : ""}</span>${densa ? "" : html`${chica}${desplegable}`}</div>
   </li>`;
 }
 
 function rotulo(nombre, nota, cuenta) {
-  return html`<h2 class="rotulo"><span>${nombre}</span>${cuenta !== undefined ? html`<span class="rotulo-n">${numero(cuenta)}</span>` : ""}${nota ? html`<span class="rotulo-nota">${nota}</span>` : ""}</h2>`;
+  return html`<h2 class="rotulo"><span class="rotulo-nombre">${nombre}</span>${cuenta !== undefined ? html`<span class="rotulo-n">${numero(cuenta)}</span>` : ""}${nota ? html`<span class="rotulo-nota">${nota}</span>` : ""}</h2>`;
 }
 
 async function vistaPrincipal() {
@@ -3067,19 +3086,20 @@ async function vistaPrincipal() {
   const titulares = [...p.negocios.flatMap((s) => s.titulares), ...BLOQUES_PRINCIPAL.slice(1).flatMap((clave) => p[clave])];
   const piezasAqui = titulares.reduce((n, b) => n + 1 + (b.otras?.length || 0), 0);
   const filas = (lista, opciones) => html`<ol class="filas">${lista.map((b) => filaTitular(b, vistos, opciones))}</ol>`;
+  const [lead, ...siguen] = p.del_dia;
+  const segundas = siguen.slice(0, 3);
+  const demas = siguen.slice(segundas.length);
   pintar(html`
     <header class="cabezal">
-      <div>
-        <p class="cabezal-kicker">${fechaConDia(p.dia)}</p>
-        <h1>Principal</h1>
-      </div>
+      <h1><span class="oculto">Principal: </span>${fechaDelDia(p.dia)}</h1>
       <p class="cabezal-dek"><span><b>${numero(titulares.length)}</b> titulares escogidos de <b>${numero(p.piezas)}</b> piezas</span>
-        <a href="#/todo">Todo lo demás: ${numero(Math.max(0, p.piezas - piezasAqui))} piezas →</a></p>
+        <a href="#/todo">Todo lo demás <b>${numero(Math.max(0, p.piezas - piezasAqui))}</b></a></p>
     </header>
     <div class="portada">
-      ${p.del_dia.length ? html`<section class="bloque bloque-dia">
+      ${lead ? html`<section class="bloque bloque-dia">
         ${rotulo("Lo del día", "Lo que cuentan tres medios o más, de más a menos")}
-        <ol class="dia">${p.del_dia.map((b, i) => itemDelDia(b, vistos, i === 0))}</ol>
+        <ol class="dia dia-arriba">${itemDelDia(lead, vistos, "lead")}${segundas.map((b) => itemDelDia(b, vistos, "segunda"))}</ol>
+        ${demas.length ? html`<ol class="dia dia-abajo" start="${segundas.length + 2}">${demas.map((b) => itemDelDia(b, vistos, "resto"))}</ol>` : ""}
       </section>` : ""}
       ${p.negocios.length ? html`<section class="bloque bloque-negocios">
         ${rotulo("Tus negocios", "Tus sectores y lo que los nombra")}
@@ -3088,12 +3108,14 @@ async function vistaPrincipal() {
       </section>` : ""}
       ${p.colombia.length ? html`<section class="bloque bloque-colombia">
         ${rotulo("Colombia", "Primero lo que cuentan varios medios")}${filas(p.colombia)}</section>` : ""}
-      ${p.america_latina.length ? html`<section class="bloque bloque-latam">
-        ${rotulo("América Latina", "Lo que cuentan medios de dos países o más")}${filas(p.america_latina)}</section>` : ""}
-      ${p.lecturas.length ? html`<section class="bloque bloque-lecturas">
-        ${rotulo("Lecturas largas", "Blogs, boletines y revistas de autor")}
-        <ol class="filas lecturas">${p.lecturas.map((b) => filaTitular(b, vistos))}</ol>
-      </section>` : ""}
+      ${p.america_latina.length || p.lecturas.length ? html`<div class="bloque bloque-media">
+        ${p.america_latina.length ? html`<section class="bloque-latam">
+          ${rotulo("América Latina", "Lo que cuentan medios de dos países o más")}${filas(p.america_latina)}</section>` : ""}
+        ${p.lecturas.length ? html`<section class="bloque-lecturas">
+          ${rotulo("Lecturas largas", "Blogs, boletines y revistas de autor")}
+          <ol class="filas lecturas">${p.lecturas.map((b) => filaTitular(b, vistos))}</ol>
+        </section>` : ""}
+      </div>` : ""}
     </div>
     <p class="nota pie-vista">Hoy, Geografía, Áreas, Sectores y Seguimiento quedaron como estaban el 20 de noviembre,
       cuando se pausó la parte con Claude. <a href="#/hoy">Ver lo anterior</a></p>
@@ -3108,30 +3130,32 @@ async function vistaTodo() {
   let abiertas = new Set(["Colombia"]);
   try { abiertas = new Set(JSON.parse(localStorage.getItem(CLAVE_TODO_ABIERTAS)) ?? ["Colombia"]); } catch { /* sin almacenamiento */ }
   const total = t.secciones.reduce((n, s) => n + s.titulares.length, 0);
+  const mayor = Math.max(1, ...t.secciones.map((s) => s.titulares.length));
   const idDe = (nombre) => `seccion-${slugV2(nombre)}`;
+  // En el índice, una barra por sección: dónde está el grueso del día.
+  const barra = (n) => html`<svg class="indice-barra" viewBox="0 0 100 4" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect width="${Math.max(1.5, (100 * n) / mayor).toFixed(1)}" height="4"/></svg>`;
+  const medios = (s) => new Set(s.titulares.map((b) => b.f)).size;
   pintar(html`
     <header class="cabezal">
-      <div>
-        <p class="cabezal-kicker">${fechaConDia(t.dia)}</p>
-        <h1>Todo lo demás</h1>
-      </div>
-      <p class="cabezal-dek"><span><b>${numero(total)}</b> titulares en ${t.secciones.length} secciones</span>
-        <a href="#/principal">← Principal</a></p>
+      <h1>Todo lo demás</h1>
+      <p class="cabezal-dek"><span>${fechaDelDia(t.dia)}: <b>${numero(total)}</b> titulares en ${t.secciones.length} secciones</span>
+        <a href="#/principal">Volver a Principal</a></p>
     </header>
     <div class="todo">
       <nav class="indice" aria-label="Secciones">
         <label class="buscador filtro-todo"><span class="oculto">Filtrar los titulares</span>
-          <input id="filtro-todo" type="search" autocomplete="off" placeholder="Filtrar: Petro, Nvidia, litio…">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input id="filtro-todo" type="search" autocomplete="off" placeholder="Filtrar: Petro, Nvidia…">
         </label>
         <ol>${t.secciones.map((s) => html`<li><button type="button" data-ir="${s.seccion}">
-          <span>${s.seccion}</span><span class="indice-n">${numero(s.titulares.length)}</span></button></li>`)}</ol>
+          <span class="indice-nombre">${s.seccion}</span><span class="indice-n">${numero(s.titulares.length)}</span>${barra(s.titulares.length)}</button></li>`)}</ol>
       </nav>
       <div class="todo-secciones" id="secciones-todo">${t.secciones.map((s) => html`<details class="seccion-todo" id="${idDe(s.seccion)}"
         data-seccion="${s.seccion}" data-total="${s.titulares.length}"${abiertas.has(s.seccion) ? seguro(" open") : ""}>
-        <summary>${rotulo(s.seccion, "", s.titulares.length)}</summary>
-        <ol class="filas">${s.titulares.map((b) => filaTitular(b, vistos, { densa: true }))}</ol>
+        <summary>${rotulo(s.seccion, medios(s) === 1 ? "1 medio" : `${medios(s)} medios`, s.titulares.length)}</summary>
+        <ol class="filas">${s.titulares.map((b, i) => filaTitular(b, vistos, { densa: true, repite: i > 0 && s.titulares[i - 1].f === b.f }))}</ol>
       </details>`)}
-        <p class="nota" id="sin-coincidencias" hidden>Nada coincide con el filtro.</p>
+        <p class="nota" id="sin-coincidencias" hidden>Nada coincide con el filtro. Prueba con otra palabra o bórralo con Esc.</p>
       </div>
     </div>
   `);
@@ -3156,6 +3180,7 @@ async function vistaTodo() {
   });
   // En el índice se ilumina la sección que estás leyendo.
   const botones = new Map([...indice.querySelectorAll("[data-ir]")].map((b) => [b.dataset.ir, b]));
+  botones.values().next().value?.setAttribute("aria-current", "true"); // arriba de todo, la primera
   const observador = new IntersectionObserver((entradas) => {
     for (const e of entradas) {
       if (!e.isIntersecting) continue;
@@ -3167,23 +3192,39 @@ async function vistaTodo() {
   let items = null;
   const filtro = document.getElementById("filtro-todo");
   filtro.addEventListener("input", () => {
-    items ??= [...caja.querySelectorAll("li.fila")].map((li) => [li, sinTildes(li.textContent)]);
+    items ??= [...caja.querySelectorAll("li.fila")].map((li) => [li, sinTildes(li.textContent), li.querySelector(".medio").textContent, li.parentElement]);
     const consulta = sinTildes(filtro.value.trim());
     filtrando = Boolean(consulta);
-    for (const [li, texto] of items) li.hidden = filtrando && !texto.includes(consulta);
+    contenido.querySelector(".todo").classList.toggle("filtrando", filtrando);
+    // El medio se escribe una vez por tramo de titulares visibles: si el filtro esconde el primero, lo muestra el siguiente.
+    let lista = null;
+    let anterior = null;
+    for (const [li, texto, medio, padre] of items) {
+      li.hidden = filtrando && !texto.includes(consulta);
+      if (li.hidden) continue;
+      if (padre !== lista) [lista, anterior] = [padre, null];
+      li.classList.toggle("repite", medio === anterior);
+      anterior = medio;
+    }
     let alguna = false;
     for (const seccion of caja.querySelectorAll(".seccion-todo")) {
       const visibles = seccion.querySelectorAll("li.fila:not([hidden])").length;
-      const cuenta = numero(filtrando ? visibles : Number(seccion.dataset.total));
+      const n = filtrando ? visibles : Number(seccion.dataset.total);
       seccion.hidden = filtrando && !visibles;
       seccion.open = filtrando ? visibles > 0 : abiertas.has(seccion.dataset.seccion);
-      seccion.querySelector(".rotulo-n").textContent = cuenta;
+      seccion.querySelector(".rotulo-n").textContent = numero(n);
       const boton = botones.get(seccion.dataset.seccion);
-      boton.querySelector(".indice-n").textContent = cuenta;
+      boton.querySelector(".indice-n").textContent = numero(n);
+      boton.querySelector(".indice-barra rect").setAttribute("width", Math.max(1.5, (100 * n) / mayor).toFixed(1));
       boton.parentElement.hidden = filtrando && !visibles;
       alguna ||= visibles > 0;
     }
     document.getElementById("sin-coincidencias").hidden = !filtrando || alguna;
+  });
+  filtro.addEventListener("keydown", (evento) => {
+    if (evento.key !== "Escape" || !filtro.value) return;
+    filtro.value = "";
+    filtro.dispatchEvent(new Event("input"));
   });
   marcarVisita("todo");
 }
