@@ -3032,6 +3032,10 @@ function enlaceTitular(b, vistos, clase = "titular") {
   return html`<a class="${clase}" href="${enlaceLector({ archivo: b.a })}" lang="${b.i || "es"}">${vistos.has(b.a) ? marcaVista : ""}${b.t}</a>`;
 }
 
+// Un documento (concepto, comunicado, decreto) cuyo título solo decía qué era: titulares.py le puso de
+// titular de qué trata, y aquí va en pequeño el tipo y la entidad; el título original, al pasar encima.
+const documentoDe = (b) => (b.o ? html`<span class="documento" title="${b.o}">${b.e || b.o}</span>` : "");
+
 // Los otros titulares de la misma noticia, plegados.
 function otrosTitulares(otras, vistos, { desde = 0, texto } = {}) {
   const resto = otras.slice(desde);
@@ -3223,7 +3227,7 @@ function itemDelDia(b, vistos, nivel) {
   return html`<li class="dia-item dia-${nivel}${yaVista(b, vistos) ? " visto" : ""}">
     ${cobertura(b)}
     ${enlaceTitular(b, vistos)}
-    <div class="fila-meta"><span class="medio">${b.f}</span><span class="minutos">${b.m} min</span>${b.x ? html`<span>solo el extracto</span>` : ""}${
+    <div class="fila-meta"><span class="medio">${b.f}</span>${documentoDe(b)}<span class="minutos">${b.m} min</span>${b.x ? html`<span>solo el extracto</span>` : ""}${
       marcaDeSintesis(b)}${lead ? tambienEn(b, 6) : otrosTitulares(otras, vistos)}${notasDeBoletin(b)}</div>
     ${lead && otras.length ? html`<ul class="dia-otras">${otras.slice(0, OTRAS_A_LA_VISTA).map((o) => html`<li>${enlaceTitular(o, vistos, "")}<span class="otra-fuente">${o.f}</span></li>`)}</ul>` : ""}
     ${lead ? otrosTitulares(otras, vistos, { desde: OTRAS_A_LA_VISTA }) : ""}
@@ -3238,8 +3242,8 @@ function filaTitular(b, vistos, { densa = false, repite = false } = {}) {
   const desplegable = otrosTitulares(otras, vistos, { texto: b.n > 1 ? undefined : `${otras.length + 1} piezas de ${b.f}` });
   const chica = b.n > 1 ? html`<span class="cobertura-chica" title="Lo cuentan ${b.n} medios">${palotes(b.n)}${b.n} medios</span>` : "";
   return html`<li class="fila${densa ? " densa" : ""}${repite ? " repite" : ""}${yaVista(b, vistos) ? " visto" : ""}">
-    <div class="fila-titular">${enlaceTitular(b, vistos)}${densa ? html` ${chica}${marcaDeSintesis(b)}${desplegable}${notasDeBoletin(b)}` : ""}</div>
-    <div class="fila-meta"><span class="medio">${b.f}</span><span class="minutos">${b.m} min${b.x ? " · extracto" : ""}</span>${
+    <div class="fila-titular">${enlaceTitular(b, vistos)}${densa ? html` ${documentoDe(b)}${chica}${marcaDeSintesis(b)}${desplegable}${notasDeBoletin(b)}` : ""}</div>
+    <div class="fila-meta"><span class="medio">${b.f}</span>${densa ? "" : documentoDe(b)}<span class="minutos">${b.m} min${b.x ? " · extracto" : ""}</span>${
       densa ? "" : html`${chica}${marcaDeSintesis(b)}${desplegable}${notasDeBoletin(b)}`}</div>
   </li>`;
 }

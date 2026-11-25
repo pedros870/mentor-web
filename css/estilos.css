@@ -1619,6 +1619,10 @@ a.entidad:hover { color: var(--acento); }
 .cobertura-chica .palotes { height: 0.625rem; }
 .fila-meta > .cobertura-chica { margin-left: var(--e3); vertical-align: baseline; }
 .visto .cobertura, .visto .cobertura-chica { color: var(--texto-suave); }
+
+/* Qué documento es (un concepto jurídico, un comunicado) cuando el titular dice de qué trata. */
+.documento { font: 400 var(--t-meta)/1.5 var(--sans); color: var(--texto-suave); }
+.fila-titular > .documento { margin-left: 0.25em; } /* con el espacio de antes; si baja de renglón, no queda sangría */
 .visto .palotes { color: var(--palote-apagado); }
 
 /* Los otros titulares de una noticia, plegados en la línea del medio (o detrás del titular en Todo);
