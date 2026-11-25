@@ -1908,3 +1908,103 @@ details.otras { border-top: 0; padding: 0; margin: var(--e1) 0 0; }
   .fila.densa.repite:hover .medio { visibility: visible; color: var(--texto-suave); }
   .filas > .fila.densa:first-child { padding-top: 0.42rem; }
 }
+
+/* ---------- Boletines y síntesis a pedido ---------- */
+
+/* Lo que trae un boletín: abierto de entrada, con la misma regla de lápiz que los otros titulares. */
+.boletin > summary { color: var(--acento); }
+.boletin li { font-family: var(--serif-fila); color: var(--texto); }
+.visto .boletin li { color: var(--texto-suave); }
+
+/* El estado de una síntesis: un círculo vacío si está pedida, lleno si ya está para leer. */
+.sintesis-estado { font: 600 var(--t-meta)/1.5 var(--sans); color: var(--texto-suave); white-space: nowrap; }
+.sintesis-estado::before {
+  content: "";
+  display: inline-block;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-right: 0.35rem;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  vertical-align: 0.02em;
+}
+a.sintesis-estado.lista { color: var(--acento); text-decoration: none; }
+a.sintesis-estado.lista::before { background: currentColor; }
+a.sintesis-estado.lista:hover { color: var(--acento-fuerte); text-decoration: underline; }
+.fila-titular > .sintesis-estado { margin-left: var(--e2); }
+
+/* Escoger para síntesis: una casilla a la izquierda de cada noticia y la escogida resaltada. */
+.cabezal-dek .boton-escoger { padding: 0.3rem 0.75rem; font-size: var(--t-meta); }
+.escogiendo li.fila, .escogiendo li.dia-item { position: relative; padding-left: 2rem; cursor: pointer; }
+input.escoger {
+  position: absolute;
+  left: 0.3rem;
+  top: 0.85rem;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin: 0;
+  accent-color: var(--acento);
+  cursor: pointer;
+}
+input.escoger:disabled { cursor: not-allowed; opacity: 0.5; }
+.filas > .fila:first-child > input.escoger { top: 0.3rem; }
+.dia-item > input.escoger { top: 1.05rem; }
+.dia-lead > input.escoger, .dia-lead + .dia-segunda > input.escoger { top: 0.55rem; }
+.fila.densa > input.escoger { top: 0.5rem; }
+.escogiendo li.escogida { background: var(--resalte); box-shadow: inset 3px 0 0 var(--acento); }
+@media (min-width: 960px) {
+  .escogiendo li.fila.densa { padding-left: calc(var(--e3) + 2rem); }
+  .fila.densa > input.escoger { left: calc(var(--e3) + 0.3rem); }
+}
+
+.barra-escoger {
+  position: fixed;
+  z-index: 16;
+  left: 50%;
+  bottom: calc(var(--alto-nav) + env(safe-area-inset-bottom) + 0.6rem);
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  width: min(34rem, calc(100% - 16px));
+  padding: 0.5rem 0.6rem 0.5rem 1rem;
+  background: var(--texto);
+  color: var(--fondo);
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgb(0 0 0 / 0.25);
+}
+.barra-escoger[hidden] { display: none; }
+.barra-escoger-texto { flex: 1; margin: 0; font-size: var(--t-ui); }
+.barra-escoger .boton-texto { color: inherit; padding: 0.5rem 0.25rem; }
+body.con-barra-escoger { padding-bottom: calc(var(--alto-nav) + env(safe-area-inset-bottom) + 4.5rem); }
+@media (min-width: 860px) {
+  .barra-escoger { bottom: 1.25rem; }
+  body.con-barra-escoger { padding-bottom: 5.5rem; }
+}
+
+/* La síntesis en el lector: arriba del texto, levantada del papel, con la raya del lápiz. */
+.sintesis-claude {
+  margin: 0 0 var(--e6);
+  padding: var(--e4) var(--e5) var(--e5);
+  background: var(--superficie);
+  border: 1px solid var(--borde);
+  border-left: 3px solid var(--acento);
+  border-radius: var(--radio);
+}
+.sintesis-claude h2 { font-size: 1.125rem; margin: 0 0 0.15rem; }
+.sintesis-claude > .meta { margin: 0 0 var(--e3); font-size: var(--t-meta); }
+.sintesis-claude > .meta:last-child { margin: var(--e3) 0 0; }
+.texto-sintesis { font-family: var(--serif); font-size: 1.0625rem; line-height: 1.62; overflow-wrap: break-word; }
+.texto-sintesis p, .texto-sintesis ul, .texto-sintesis ol { margin: 0 0 0.8em; }
+.texto-sintesis ul, .texto-sintesis ol { padding-left: 1.2em; }
+.texto-sintesis h3, .texto-sintesis h4 { margin: 1.2em 0 0.4em; font-size: 1rem; }
+.texto-sintesis > :last-child { margin-bottom: 0; }
+.sintesis-pedida {
+  margin: 0 0 var(--e5);
+  padding: 0.6rem 0.9rem;
+  background: var(--acento-suave);
+  border-left: 3px solid var(--acento);
+  border-radius: 0 var(--radio) var(--radio) 0;
+  font-size: 0.9375rem;
+}

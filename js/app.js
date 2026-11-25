@@ -340,7 +340,12 @@ async function vistaLector(ruta) {
   const [resumen, lectura, cuadernoLector, avancesGuardados, tipos, fichas] = await Promise.all([leerResumen().catch(() => null),
     estadoDeLectura(), leerCuaderno().catch(() => []), avances(), tiposDelDia(ruta), fichasDeFuentes()]);
   const tipo = TIPOS_DE_PIEZA[tipos[ruta]];
-  const hilosDeLaPieza = hilosDe(cuadernoLector).filter((x) => x[0].archivo === ruta && x[0].clase !== "palabra" && !x[0].archivada);
+  const hilosDeLaPieza = hilosDe(cuadernoLector).filter((x) => x[0].archivo === ruta && !["palabra", "sintesis"].includes(x[0].clase)
+    && !x[0].archivada);
+  // La síntesis que pidió de esta noticia (desde esta pieza o desde otra versión de la misma), arriba del texto.
+  const sintesis = cuadernoLector.filter((e) => e.clase === "sintesis" && !e.archivada && [e.archivo, ...(e.otras || [])].includes(ruta));
+  const sintesisLista = sintesis.findLast((e) => e.respuestas.length);
+  const respuestaSintesis = sintesisLista?.respuestas.at(-1);
   const clasificacion = resumen?.titulares.find((t) => t.archivo === ruta);
   // Lo que el sistema recomendó leer completo (y lo de Para leer) se califica con
   // "¿valió la pena?" (mide si acierta); lo demás, con "¿te sirvió?" (mide lo que se está perdiendo).
@@ -364,6 +369,14 @@ async function vistaLector(ruta) {
         ${clasificacion ? html`<p class="razon-claude"><span class="insignia insignia-${clasificacion.recomendacion}">${RECOMENDACIONES[clasificacion.recomendacion]}</span> ${clasificacion.razon}</p>` : ""}
         ${extracto ? html`<p class="aviso">Solo se obtuvo el extracto (${MOTIVOS_DE_EXTRACTO[ficha.motivo_extracto] || ficha.motivo_extracto}). El texto completo está en el original.</p>` : ""}
       </header>
+      ${respuestaSintesis ? html`<section class="sintesis-claude" aria-labelledby="titulo-sintesis">
+        <h2 id="titulo-sintesis">Síntesis de Claude</h2>
+        <p class="meta">${sintesisLista.otras?.length ? `Con las ${sintesisLista.otras.length + 1} versiones de la noticia` : "De esta pieza"} · ${
+          fechaLarga(respuestaSintesis.ts, true)}</p>
+        <div class="texto-sintesis">${seguro(markdownAHtml(respuestaSintesis.texto))}</div>
+        <p class="meta">Abajo, el texto completo de ${ficha.fuente}.</p>
+      </section>` : sintesis.length ? html`<p class="sintesis-pedida">Pediste la síntesis de esta noticia: Claude la escribe cuando abras
+        <strong>/cuaderno</strong> en Claude Code.</p>` : ""}
       <div class="cuerpo">${seguro(markdownAHtml(texto))}</div>
       <section class="valoracion">
         <button class="boton-secundario" type="button" id="leido" aria-pressed="${String(leido)}">${leido ? "✓ Leído" : "Lo leí"}</button>
@@ -1219,6 +1232,7 @@ async function vistaCuaderno() {
         : html`<p class="nota">En el lector, selecciona una frase y toca "Guardar frase". Aquí queda con su lectura y lo que pienses de ella.</p>`}
     </section>
     ${seccion("Preguntas", respondidos("pregunta"), "Las preguntas que le hagas a Claude sobre una noticia aparecen aquí con su respuesta.")}
+    ${respondidos("sintesis").length ? seccion("Síntesis", respondidos("sintesis"), "") : ""}
     ${seccion("Vocabulario", respondidos("palabra"), "En el lector, selecciona una palabra y toca \"Vocabulario\". El repaso diario llega cuando haya palabras.")}
     ${respondidos("error").length ? seccion("Errores en los textos", respondidos("error"), "") : ""}
     ${seccion("Pedidos para Mentor", respondidos("pedido"), "Lo que quieras cambiar o agregar en Mentor.")}
@@ -2669,7 +2683,7 @@ const IR_A = [
 const GRUPOS_DE_BUSQUEDA = { visitadas: "Lo que más visitas", ir: "Ir a", seccion: "Secciones", historia: "Historias", nombre: "Nombres",
   lectura: "Para leer y para ver", fuente: "Fuentes", cuaderno: "En tu Cuaderno", accion: "Dejarle algo a Claude" };
 const CUANTOS_POR_GRUPO = { seccion: 4, historia: 8, nombre: 4, lectura: 3, fuente: 3, cuaderno: 3 };
-const CLASES_EN_BUSQUEDA = { ...CLASES_CUADERNO, reflexion: "Reflexión", error: "Error en el texto" };
+const CLASES_EN_BUSQUEDA = { ...CLASES_CUADERNO, reflexion: "Reflexión", error: "Error en el texto", sintesis: "Síntesis" };
 
 const campo = (texto, peso) => [normalizar(texto), peso];
 
@@ -2888,6 +2902,7 @@ const ATAJOS = [
   [["s"], "", "Seguir o soltar la historia marcada"],
   [["p"], "", "Preguntarle a Claude sobre la historia marcada, o sobre lo que tienes abierto"],
   [["e"], "", "Escuchar lo que tienes en pantalla; si ya suena, pausar o seguir"],
+  [["x"], "", "En Principal y Todo, con \"Escoger para síntesis\" activo: escoger o soltar la noticia marcada (Esc deja de escoger)"],
   [["[", "]"], "o", "Subpestaña anterior o siguiente"],
   [["g", "h"], "y luego", "Ir a Principal. Con g y otra letra: d Todo lo demás, l Para leer, v Para ver, c Cuaderno, r Repaso, f Fuentes, t Estado"],
   [["1", "4"], "a", "En el Repaso, responder con la opción de ese número"],
@@ -3049,6 +3064,153 @@ function cobertura(b) {
   return html`<span class="cobertura" title="${medios.join(", ")}">${palotes(b.n)}<span class="cobertura-n">${b.n} medios</span></span>`;
 }
 
+// ---------- Boletines y síntesis a pedido ----------
+
+// Lo que trae un boletín (3 Quarks Daily, "assorted links", "Duerma informado"…): sus notas a la vista,
+// sin abrirlo. Las saca titulares.py del texto guardado; las que tienen enlace llevan al sitio original.
+const REDIRECCIONES = /list-manage|substack\.com\/redirect|kill-the-newsletter|mailchi\.mp/;
+const destinoDe = (u) => u.match(/feedblitz\.com\/.*?\/~(https?:\/\/.+)$/)?.[1] || u; // sin el rastreador del feed
+function notasDeBoletin(b) {
+  if (!b.d?.length) return "";
+  return html`<details class="otras boletin" open><summary>Trae ${b.d.length === 1 ? "1 nota" : `${b.d.length} notas`}</summary>
+    <ul>${b.d.map((n) => {
+      if (!n.u) return html`<li>${n.t}</li>`;
+      const u = destinoDe(n.u);
+      return html`<li><a href="${u}" target="_blank" rel="noopener noreferrer">${n.t}</a>${
+        REDIRECCIONES.test(u) ? "" : html`<span class="otra-fuente">${dominio(u)}</span>`}</li>`;
+    })}</ul></details>`;
+}
+
+// Las síntesis que Pedro pidió y si Claude ya las escribió, por archivo (el principal de la noticia y sus
+// otras versiones). Las pide desde Principal o Todo y las escribe Claude con /cuaderno, sin API.
+let sintesisEnVista = new Map();
+let titularesEnVista = new Map(); // archivo → titular, para armar el pedido
+async function estadoDeSintesis() {
+  const mapa = new Map();
+  for (const e of await leerCuaderno().catch(() => [])) {
+    if (e.clase !== "sintesis" || e.archivada) continue;
+    const estado = e.respuestas.length ? "lista" : "pedida";
+    for (const a of [e.archivo, ...(e.otras || [])]) if (a && mapa.get(a)?.estado !== "lista") mapa.set(a, { estado, entrada: e });
+  }
+  return mapa;
+}
+
+function marcaDeSintesis(b) {
+  const s = sintesisEnVista.get(b.a);
+  if (!s) return "";
+  return s.estado === "lista"
+    ? html`<a class="sintesis-estado lista" href="${enlaceLector({ archivo: b.a })}">Síntesis lista</a>`
+    : html`<span class="sintesis-estado" title="Claude la escribe cuando abras /cuaderno en Claude Code">Síntesis pedida</span>`;
+}
+
+// "Escoger para síntesis": pone una casilla en cada noticia; las escogidas se piden de una vez y quedan en
+// el Cuaderno. Mientras se escoge, tocar una noticia la marca en vez de abrirla; los desplegables se abren igual.
+const FILAS_ESCOGIBLES = "li.fila, li.dia-item";
+const archivoDeFila = (li) => decodeURIComponent((li.querySelector(":scope > .titular, :scope > .fila-titular > .titular")
+  ?.getAttribute("href") || "").replace(/^#\/leer\//, ""));
+const botonEscoger = html`<button class="boton-secundario boton-escoger" type="button" data-escoger aria-pressed="false">Escoger para síntesis</button>`;
+
+function activarEscoger(contenedor) {
+  const boton = contenido.querySelector("[data-escoger]");
+  if (!boton || !contenedor) return;
+  const barra = document.createElement("div");
+  barra.className = "barra-escoger";
+  barra.hidden = true;
+  barra.setAttribute("role", "region");
+  barra.setAttribute("aria-label", "Síntesis a pedido");
+  barra.innerHTML = html`<p class="barra-escoger-texto" aria-live="polite"></p>
+    <button class="boton" type="button" data-pedir>Pedir síntesis</button>
+    <button class="boton-texto" type="button" data-salir>Cancelar</button>`.texto;
+  contenido.append(barra);
+  const texto = barra.querySelector(".barra-escoger-texto");
+  const pedir = barra.querySelector("[data-pedir]");
+  const escogidas = new Set();
+  let escogiendo = false;
+  const contar = () => {
+    const n = escogidas.size;
+    texto.textContent = n ? `${n === 1 ? "1 noticia escogida" : `${n} noticias escogidas`}` : "Toca las noticias que quieras sintetizar";
+    pedir.disabled = !n;
+  };
+  const alternar = (caja, valor = !caja.checked) => {
+    if (caja.disabled) return;
+    caja.checked = valor;
+    caja.closest(FILAS_ESCOGIBLES).classList.toggle("escogida", valor);
+    if (valor) escogidas.add(caja.dataset.a);
+    else escogidas.delete(caja.dataset.a);
+    contar();
+  };
+  const entrar = () => {
+    escogiendo = true;
+    contenido.classList.add("escogiendo");
+    document.body.classList.add("con-barra-escoger");
+    boton.setAttribute("aria-pressed", "true");
+    boton.textContent = "Dejar de escoger";
+    for (const li of contenedor.querySelectorAll(FILAS_ESCOGIBLES)) {
+      const a = archivoDeFila(li);
+      const b = titularesEnVista.get(a);
+      if (!b) continue;
+      const caja = document.createElement("input");
+      caja.type = "checkbox";
+      caja.className = "escoger";
+      caja.dataset.a = a;
+      caja.setAttribute("aria-label", `Escoger para síntesis: ${b.t}`);
+      if (sintesisEnVista.has(a)) {
+        caja.disabled = true;
+        caja.title = "Ya la pediste";
+      }
+      li.prepend(caja);
+    }
+    barra.hidden = false;
+    contar();
+  };
+  const salir = () => {
+    escogiendo = false;
+    contenido.classList.remove("escogiendo");
+    document.body.classList.remove("con-barra-escoger");
+    boton.setAttribute("aria-pressed", "false");
+    boton.textContent = "Escoger para síntesis";
+    for (const caja of contenedor.querySelectorAll("input.escoger")) caja.remove();
+    for (const li of contenedor.querySelectorAll(".escogida")) li.classList.remove("escogida");
+    escogidas.clear();
+    barra.hidden = true;
+  };
+  boton.addEventListener("click", () => (escogiendo ? salir() : entrar()));
+  barra.querySelector("[data-salir]").addEventListener("click", salir);
+  contenedor.addEventListener("change", (evento) => {
+    if (evento.target.matches("input.escoger")) alternar(evento.target, evento.target.checked);
+  });
+  // Mientras se escoge, tocar la noticia la marca (los desplegables se siguen abriendo).
+  contenedor.addEventListener("click", (evento) => {
+    if (!escogiendo || evento.target.matches("input.escoger") || evento.target.closest("summary")) return;
+    const caja = evento.target.closest(FILAS_ESCOGIBLES)?.querySelector(":scope > input.escoger");
+    if (!caja) return;
+    evento.preventDefault();
+    alternar(caja);
+  }, true);
+  pedir.addEventListener("click", () => {
+    const lista = [...escogidas].map((a) => titularesEnVista.get(a)).filter(Boolean);
+    for (const b of lista) {
+      marcar({ tipo: "cuaderno", clase: "sintesis", texto: "Síntesis de esta noticia", archivo: b.a, titulo: b.t,
+        ...(b.otras?.length ? { otras: b.otras.map((o) => o.a) } : {}) });
+    }
+    salir();
+    avisar(`${lista.length === 1 ? "Pediste 1 síntesis" : `Pediste ${lista.length} síntesis`}. Claude las escribe cuando abras /cuaderno en Claude Code.`);
+    repintarVista();
+  });
+  // Con el teclado: x marca la noticia señalada con j/k; Esc deja de escoger.
+  teclasDeLaVista = (evento) => {
+    if (!escogiendo) return false;
+    if (evento.key === "Escape") {
+      salir();
+      return true;
+    }
+    if (evento.key !== "x") return false;
+    const caja = contenido.querySelector(".enfocada")?.querySelector(":scope > input.escoger");
+    if (caja) alternar(caja);
+    return Boolean(caja);
+  };
+}
+
 // Lo del día en tres niveles: la de más cobertura en grande, con los medios que también la cuentan y
 // cinco de sus otros titulares a la vista; las tres siguientes a su lado, y el resto en filas de tres.
 // Los nombres de los medios de las demás salen al pasar el ratón por los palotes y al abrir sus titulares.
@@ -3062,7 +3224,7 @@ function itemDelDia(b, vistos, nivel) {
     ${cobertura(b)}
     ${enlaceTitular(b, vistos)}
     <div class="fila-meta"><span class="medio">${b.f}</span><span class="minutos">${b.m} min</span>${b.x ? html`<span>solo el extracto</span>` : ""}${
-      lead ? tambienEn(b, 6) : otrosTitulares(otras, vistos)}</div>
+      marcaDeSintesis(b)}${lead ? tambienEn(b, 6) : otrosTitulares(otras, vistos)}${notasDeBoletin(b)}</div>
     ${lead && otras.length ? html`<ul class="dia-otras">${otras.slice(0, OTRAS_A_LA_VISTA).map((o) => html`<li>${enlaceTitular(o, vistos, "")}<span class="otra-fuente">${o.f}</span></li>`)}</ul>` : ""}
     ${lead ? otrosTitulares(otras, vistos, { desde: OTRAS_A_LA_VISTA }) : ""}
   </li>`;
@@ -3076,8 +3238,9 @@ function filaTitular(b, vistos, { densa = false, repite = false } = {}) {
   const desplegable = otrosTitulares(otras, vistos, { texto: b.n > 1 ? undefined : `${otras.length + 1} piezas de ${b.f}` });
   const chica = b.n > 1 ? html`<span class="cobertura-chica" title="Lo cuentan ${b.n} medios">${palotes(b.n)}${b.n} medios</span>` : "";
   return html`<li class="fila${densa ? " densa" : ""}${repite ? " repite" : ""}${yaVista(b, vistos) ? " visto" : ""}">
-    <div class="fila-titular">${enlaceTitular(b, vistos)}${densa ? html` ${chica}${desplegable}` : ""}</div>
-    <div class="fila-meta"><span class="medio">${b.f}</span><span class="minutos">${b.m} min${b.x ? " · extracto" : ""}</span>${densa ? "" : html`${chica}${desplegable}`}</div>
+    <div class="fila-titular">${enlaceTitular(b, vistos)}${densa ? html` ${chica}${marcaDeSintesis(b)}${desplegable}${notasDeBoletin(b)}` : ""}</div>
+    <div class="fila-meta"><span class="medio">${b.f}</span><span class="minutos">${b.m} min${b.x ? " · extracto" : ""}</span>${
+      densa ? "" : html`${chica}${marcaDeSintesis(b)}${desplegable}${notasDeBoletin(b)}`}</div>
   </li>`;
 }
 
@@ -3086,9 +3249,11 @@ function rotulo(nombre, nota, cuenta) {
 }
 
 async function vistaPrincipal() {
-  const [p, vistos] = await Promise.all([leerTitulares("principal"), piezasAbiertas()]);
+  const [p, vistos, sintesis] = await Promise.all([leerTitulares("principal"), piezasAbiertas(), estadoDeSintesis()]);
   titularesDesde = "#/principal";
+  sintesisEnVista = sintesis;
   const titulares = [...p.negocios.flatMap((s) => s.titulares), ...BLOQUES_PRINCIPAL.slice(1).flatMap((clave) => p[clave])];
+  titularesEnVista = new Map(titulares.map((b) => [b.a, b]));
   const piezasAqui = titulares.reduce((n, b) => n + 1 + (b.otras?.length || 0), 0);
   const filas = (lista, opciones) => html`<ol class="filas">${lista.map((b) => filaTitular(b, vistos, opciones))}</ol>`;
   const [lead, ...siguen] = p.del_dia;
@@ -3098,7 +3263,7 @@ async function vistaPrincipal() {
     <header class="cabezal">
       <h1><span class="oculto">Principal: </span>${fechaDelDia(p.dia)}</h1>
       <p class="cabezal-dek"><span><b>${numero(titulares.length)}</b> titulares escogidos de <b>${numero(p.piezas)}</b> piezas</span>
-        <a href="#/todo">Todo lo demás <b>${numero(Math.max(0, p.piezas - piezasAqui))}</b></a></p>
+        <a href="#/todo">Todo lo demás <b>${numero(Math.max(0, p.piezas - piezasAqui))}</b></a>${botonEscoger}</p>
     </header>
     <div class="portada">
       ${lead ? html`<section class="bloque bloque-dia">
@@ -3125,12 +3290,15 @@ async function vistaPrincipal() {
     <p class="nota pie-vista">Hoy, Geografía, Áreas, Sectores y Seguimiento quedaron como estaban el 20 de noviembre,
       cuando se pausó la parte con Claude. <a href="#/hoy">Ver lo anterior</a></p>
   `);
+  activarEscoger(contenido.querySelector(".portada"));
   marcarVisita("principal");
 }
 
 async function vistaTodo() {
-  const [t, vistos] = await Promise.all([leerTitulares("todo"), piezasAbiertas()]);
+  const [t, vistos, sintesis] = await Promise.all([leerTitulares("todo"), piezasAbiertas(), estadoDeSintesis()]);
   titularesDesde = "#/todo";
+  sintesisEnVista = sintesis;
+  titularesEnVista = new Map(t.secciones.flatMap((s) => s.titulares.map((b) => [b.a, b])));
   // La primera vez, Colombia abierta; después, las que dejaste abiertas.
   let abiertas = new Set(["Colombia"]);
   try { abiertas = new Set(JSON.parse(localStorage.getItem(CLAVE_TODO_ABIERTAS)) ?? ["Colombia"]); } catch { /* sin almacenamiento */ }
@@ -3144,7 +3312,7 @@ async function vistaTodo() {
     <header class="cabezal">
       <h1>Todo lo demás</h1>
       <p class="cabezal-dek"><span>${fechaDelDia(t.dia)}: <b>${numero(total)}</b> titulares en ${t.secciones.length} secciones</span>
-        <a href="#/principal">Volver a Principal</a></p>
+        <a href="#/principal">Volver a Principal</a>${botonEscoger}</p>
     </header>
     <div class="todo">
       <nav class="indice" aria-label="Secciones">
@@ -3231,6 +3399,7 @@ async function vistaTodo() {
     filtro.value = "";
     filtro.dispatchEvent(new Event("input"));
   });
+  activarEscoger(caja);
   marcarVisita("todo");
 }
 
@@ -3341,6 +3510,8 @@ async function enrutar() {
   contenido.onchange = null;
   paraEscuchar = null;
   teclasDeLaVista = null;
+  contenido.classList.remove("escogiendo"); // el modo de escoger para síntesis es de cada vista
+  document.body.classList.remove("con-barra-escoger");
   historiasEnVista.clear();
   for (const dialogo of document.querySelectorAll("dialog[open]")) dialogo.close();
   menuSeleccion.hidden = true;
