@@ -2012,3 +2012,29 @@ body.con-barra-escoger { padding-bottom: calc(var(--alto-nav) + env(safe-area-in
   border-radius: 0 var(--radio) var(--radio) 0;
   font-size: 0.9375rem;
 }
+
+/* ---------- La pestaña Síntesis ----------
+   Una columna de lectura: el titular, quién lo cuenta y la síntesis con la raya del lápiz, como en el lector. */
+.bloque-sintesis { margin: 0 0 var(--e7); }
+.bloque-sintesis > .rotulo { margin-bottom: var(--e1); }
+.encabezado-vista + .bloque-sintesis > .rotulo { border-top: 0; padding-top: 0; } /* la regla del encabezado ya separa */
+.lista-sintesis { list-style: none; margin: 0; padding: 0; }
+.sintesis-item { padding: var(--e5) 0; border-top: 1px solid var(--borde); }
+.lista-sintesis > .sintesis-item:first-child { border-top: 0; padding-top: var(--e3); }
+.sintesis-titular { margin: 0; font: inherit; }
+.sintesis-titular .titular { font-family: var(--serif-titulo); font-size: var(--t-sub); font-weight: 600; line-height: 1.25; }
+.sintesis-item > .fila-meta { margin: var(--e1) 0 var(--e3); }
+.sintesis-item > .texto-sintesis { padding-left: var(--e4); border-left: 2px solid var(--acento); }
+.sintesis-acciones { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 var(--e5); margin-top: var(--e3);
+  font: 500 var(--t-meta)/1.5 var(--sans); }
+.sintesis-acciones .boton-texto { font-size: var(--t-meta); color: var(--texto-suave); }
+.sintesis-acciones .boton-texto:hover { color: var(--texto); }
+.sintesis-item.archivado { opacity: 0.75; }
+.vacio-sintesis { margin: var(--e5) 0; }
+
+/* Con Síntesis son ocho secciones arriba: entre 860 y 1023 px caben con menos aire entre ellas. */
+@media (min-width: 860px) and (max-width: 1023px) {
+  .cabecera { padding: 0 20px; gap: 0.75rem; }
+  .navegacion a { padding: 0 0.45rem; }
+  .navegacion a[data-vista="fuentes"] { margin-left: 0.35rem; }
+}

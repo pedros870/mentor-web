@@ -1,5 +1,5 @@
 // Mentor: la interfaz de lectura. Una sola página con vistas por dirección
-// (#/principal, #/todo, #/leer/…, #/para-leer, #/cuaderno, #/repaso, #/estado…; y lo anterior: #/hoy, #/geografia, #/p/…, #/h/…).
+// (#/principal, #/todo, #/sintesis, #/leer/…, #/para-leer, #/cuaderno, #/repaso, #/estado…; y lo anterior: #/hoy, #/geografia, #/p/…, #/h/…).
 import { buscar, impulsoDeHistoria, normalizar } from "./buscador.js";
 import { ErrorDeDatos, REPO_POR_DEFECTO, alActualizar, borrarConfig, config, guardarConfig, laVistaUsa, leerJSON, leerTexto, modoLocal,
   nuevaVista, tenerListo } from "./datos.js";
@@ -337,13 +337,12 @@ async function vistaLector(ruta) {
     .replace(/^\s*# .*\n/, "") // el título ya va en la cabecera
     .replace(/\n---\n\nSolo se obtuvo el extracto[\s\S]*$/, "");
   const extracto = ficha.extraccion === "extracto";
-  const [resumen, lectura, cuadernoLector, avancesGuardados, tipos, fichas] = await Promise.all([leerResumen().catch(() => null),
-    estadoDeLectura(), leerCuaderno().catch(() => []), avances(), tiposDelDia(ruta), fichasDeFuentes()]);
+  const [resumen, lectura, cuadernoLector, avancesGuardados, tipos, fichas, pedidos] = await Promise.all([leerResumen().catch(() => null),
+    estadoDeLectura(), leerCuaderno().catch(() => []), avances(), tiposDelDia(ruta), fichasDeFuentes(), leerSintesis().catch(() => [])]);
   const tipo = TIPOS_DE_PIEZA[tipos[ruta]];
-  const hilosDeLaPieza = hilosDe(cuadernoLector).filter((x) => x[0].archivo === ruta && !["palabra", "sintesis"].includes(x[0].clase)
-    && !x[0].archivada);
+  const hilosDeLaPieza = hilosDe(cuadernoLector).filter((x) => x[0].archivo === ruta && x[0].clase !== "palabra" && !x[0].archivada);
   // La síntesis que pidió de esta noticia (desde esta pieza o desde otra versión de la misma), arriba del texto.
-  const sintesis = cuadernoLector.filter((e) => e.clase === "sintesis" && !e.archivada && [e.archivo, ...(e.otras || [])].includes(ruta));
+  const sintesis = pedidos.filter((e) => !e.archivado && [e.archivo, ...(e.otras || [])].includes(ruta));
   const sintesisLista = sintesis.findLast((e) => e.respuestas.length);
   const respuestaSintesis = sintesisLista?.respuestas.at(-1);
   const clasificacion = resumen?.titulares.find((t) => t.archivo === ruta);
@@ -358,7 +357,7 @@ async function vistaLector(ruta) {
   pintar(html`
     <article class="lector" data-archivo="${ruta}" data-titulo="${ficha.titulo}">
       ${deLaBiblioteca ? html`<a class="volver" href="#/para-leer">← Para leer</a>`
-        : html`<a class="volver" href="${titularesDesde}">← ${titularesDesde === "#/todo" ? "Todo lo demás" : "Principal"}</a>`}
+        : html`<a class="volver" href="${titularesDesde}">← ${VOLVER_A[titularesDesde] || "Principal"}</a>`}
       <header>
         <p class="sobretitulo">${ficha.fuente}${ficha.categoria_inicial ? ` · ${ficha.categoria_inicial}` : ""}</p>
         <h1>${ficha.titulo}</h1>
@@ -376,7 +375,7 @@ async function vistaLector(ruta) {
         <div class="texto-sintesis">${seguro(markdownAHtml(respuestaSintesis.texto))}</div>
         <p class="meta">Abajo, el texto completo de ${ficha.fuente}.</p>
       </section>` : sintesis.length ? html`<p class="sintesis-pedida">Pediste la síntesis de esta noticia: Claude la escribe cuando abras
-        <strong>/cuaderno</strong> en Claude Code.</p>` : ""}
+        <strong>/sintesis</strong> en Claude Code.</p>` : ""}
       <div class="cuerpo">${seguro(markdownAHtml(texto))}</div>
       <section class="valoracion">
         <button class="boton-secundario" type="button" id="leido" aria-pressed="${String(leido)}">${leido ? "✓ Leído" : "Lo leí"}</button>
@@ -1100,23 +1099,30 @@ const INVITACIONES = {
 const PREGUNTAS_RAPIDAS = ["¿Qué implicaciones tiene?", "¿Qué significa para Colombia?", "¿Qué contexto me falta?",
   "¿Qué puede pasar ahora?"];
 
-async function leerCuaderno() {
-  const [copia, marcas, texto] = await Promise.all([
-    leerJSON("datos/cuaderno/entradas.json").catch(() => ({ marcas: [] })), todasLasMarcas(),
-    leerTexto("datos/cuaderno/respuestas.jsonl").catch(() => "")]);
-  const respuestas = new Map();
+// Las líneas de un .jsonl agrupadas por un campo (la entrada o el pedido al que responden).
+function lineasPor(texto, clave) {
+  const grupos = new Map();
   for (const linea of texto.split("\n")) {
     if (!linea.trim()) continue;
     try {
       const r = JSON.parse(linea);
-      respuestas.set(r.entrada, [...(respuestas.get(r.entrada) || []), r]);
+      grupos.set(r[clave], [...(grupos.get(r[clave]) || []), r]);
     } catch { /* línea dañada */ }
   }
+  return grupos;
+}
+
+async function leerCuaderno() {
+  const [copia, marcas, texto] = await Promise.all([
+    leerJSON("datos/cuaderno/entradas.json").catch(() => ({ marcas: [] })), todasLasMarcas(),
+    leerTexto("datos/cuaderno/respuestas.jsonl").catch(() => "")]);
+  const respuestas = lineasPor(texto, "entrada");
   const delCuaderno = new Map([...copia.marcas, ...marcas.filter((m) => m.tipo?.startsWith("cuaderno") && m.id)]
     .map((m) => [m.id, m]));
   const todas = [...delCuaderno.values()].sort((a, b) => a.ts.localeCompare(b.ts));
   const archivadas = new Map(todas.filter((m) => m.tipo === "cuaderno_archivar").map((m) => [m.entrada, m.valor !== false]));
-  return todas.filter((m) => m.tipo === "cuaderno")
+  // Los pedidos de síntesis llegaron aquí hasta el 24 de noviembre de 2026; ahora tienen su lugar aparte.
+  return todas.filter((m) => m.tipo === "cuaderno" && m.clase !== "sintesis")
     .map((m) => ({ ...m, respuestas: respuestas.get(m.id) || [], archivada: archivadas.get(m.id) || false }));
 }
 
@@ -1232,7 +1238,6 @@ async function vistaCuaderno() {
         : html`<p class="nota">En el lector, selecciona una frase y toca "Guardar frase". Aquí queda con su lectura y lo que pienses de ella.</p>`}
     </section>
     ${seccion("Preguntas", respondidos("pregunta"), "Las preguntas que le hagas a Claude sobre una noticia aparecen aquí con su respuesta.")}
-    ${respondidos("sintesis").length ? seccion("Síntesis", respondidos("sintesis"), "") : ""}
     ${seccion("Vocabulario", respondidos("palabra"), "En el lector, selecciona una palabra y toca \"Vocabulario\". El repaso diario llega cuando haya palabras.")}
     ${respondidos("error").length ? seccion("Errores en los textos", respondidos("error"), "") : ""}
     ${seccion("Pedidos para Mentor", respondidos("pedido"), "Lo que quieras cambiar o agregar en Mentor.")}
@@ -1818,8 +1823,9 @@ const slugV2 = (texto) => (texto || "").normalize("NFKD").replace(/[̀-ͯ]/g, ""
   .replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase().slice(0, 60).replace(/-+$/, "");
 
 function fechaCorta(iso) {
+  const dia = iso.length > 10 ? diaEnBogota(iso) : iso; // una marca de las 10 p. m. es del día en Bogotá, no del de Londres
   return new Intl.DateTimeFormat("es-CO", { day: "numeric", month: "short", timeZone: "America/Bogota" })
-    .format(new Date(`${iso.slice(0, 10)}T12:00:00-05:00`));
+    .format(new Date(`${dia}T12:00:00-05:00`));
 }
 
 async function marcasV2() {
@@ -2673,6 +2679,7 @@ function indiceDelBuscador() {
 
 const IR_A = [
   ["Principal", "#/principal", "inicio portada titulares hoy negocios"], ["Todo lo demás", "#/todo", "titulares escaneo todas las noticias secciones"],
+  ["Síntesis", "#/sintesis", "resumenes sintesis pedidas escogidas claude"],
   ["Hoy anterior", "#/hoy", "relevante hasta el 20 de noviembre"], ["Seguimiento", "#/seguimiento", "historias que sigo linea de tiempo"],
   ["Geografía", "#/geografia", "paises regiones mundo"], ["Áreas", "#/areas", "temas"], ["Sectores", "#/sectores", "radar negocios"],
   ["Para leer", "#/para-leer", "lecturas biblioteca libros cola guardadas"], ["Para ver", "#/para-ver", "videos cursos documentales youtube canales"],
@@ -2681,9 +2688,9 @@ const IR_A = [
   ["Gasto y piezas", "#/estado/gasto", "costos dinero api tope creditos"],
 ];
 const GRUPOS_DE_BUSQUEDA = { visitadas: "Lo que más visitas", ir: "Ir a", seccion: "Secciones", historia: "Historias", nombre: "Nombres",
-  lectura: "Para leer y para ver", fuente: "Fuentes", cuaderno: "En tu Cuaderno", accion: "Dejarle algo a Claude" };
-const CUANTOS_POR_GRUPO = { seccion: 4, historia: 8, nombre: 4, lectura: 3, fuente: 3, cuaderno: 3 };
-const CLASES_EN_BUSQUEDA = { ...CLASES_CUADERNO, reflexion: "Reflexión", error: "Error en el texto", sintesis: "Síntesis" };
+  lectura: "Para leer y para ver", fuente: "Fuentes", sintesis: "Tus síntesis", cuaderno: "En tu Cuaderno", accion: "Dejarle algo a Claude" };
+const CUANTOS_POR_GRUPO = { seccion: 4, historia: 8, nombre: 4, lectura: 3, fuente: 3, sintesis: 3, cuaderno: 3 };
+const CLASES_EN_BUSQUEDA = { ...CLASES_CUADERNO, reflexion: "Reflexión", error: "Error en el texto" };
 
 const campo = (texto, peso) => [normalizar(texto), peso];
 
@@ -2721,7 +2728,14 @@ async function armarCandidatos() {
   return { porGrupo: agrupar(candidatos, (c) => c.grupo), indice };
 }
 
-// El Cuaderno cambia mientras se usa la página: se arma cada vez que se abre el buscador.
+// Las síntesis y el Cuaderno cambian mientras se usa la página: se arman cada vez que se abre el buscador.
+async function candidatosDeSintesis() {
+  return (await leerSintesis().catch(() => [])).filter((p) => !p.archivado).map((p) => ({
+    grupo: "sintesis", href: enlaceLector(p), titulo: p.titulo || "La noticia",
+    meta: [p.fuente, fechaCorta(p.ts), p.respuestas.length ? "lista" : "por escribir"].filter(Boolean).join(" · "),
+    campos: [campo(p.titulo, 3), campo(p.respuestas.map((r) => r.texto).join(" "), 1)] }));
+}
+
 async function candidatosDelCuaderno() {
   return (await leerCuaderno().catch(() => [])).filter((e) => !e.archivada && e.clase !== "ver").map((e) => ({
     grupo: "cuaderno", href: "#/cuaderno", titulo: e.texto,
@@ -2775,7 +2789,7 @@ document.body.append(paleta);
 const campoPaleta = paleta.querySelector("input");
 const resultadosPaleta = paleta.querySelector(".paleta-resultados");
 let candidatos = null;
-let delCuaderno = [];
+let delMomento = {}; // las síntesis y el Cuaderno, por grupo
 let seleccionada = 0;
 
 function seleccionar(i) {
@@ -2813,7 +2827,7 @@ async function pintarResultados() {
     grupos = [["visitadas", visitadas], ["ir", secciones.filter((s) => s.vista)]].filter(([, lista]) => lista.length);
   } else {
     grupos = Object.keys(CUANTOS_POR_GRUPO)
-      .map((g) => [g, buscar(g === "cuaderno" ? delCuaderno : candidatos.porGrupo.get(g) || [], consulta, CUANTOS_POR_GRUPO[g])])
+      .map((g) => [g, buscar(delMomento[g] || candidatos.porGrupo.get(g) || [], consulta, CUANTOS_POR_GRUPO[g])])
       .filter(([, lista]) => lista.length).sort((a, b) => b[1][0].puntaje - a[1][0].puntaje);
     grupos.push(["accion", accionesCon(consulta)]);
   }
@@ -2846,7 +2860,8 @@ async function abrirPaleta(consulta) {
       return;
     }
   }
-  delCuaderno = await candidatosDelCuaderno();
+  const [sintesis, cuaderno] = await Promise.all([candidatosDeSintesis(), candidatosDelCuaderno()]);
+  delMomento = { sintesis, cuaderno };
   pintarResultados();
 }
 
@@ -2890,9 +2905,9 @@ async function vistaBuscar(consulta) {
 // En el computador: buscar, bajar y subir por las noticias, abrirlas, seguirlas, preguntar,
 // escuchar y saltar entre secciones sin el ratón. No actúan mientras se escribe.
 
-const IR_CON_G = { h: "#/principal", d: "#/todo", s: "#/seguimiento", g: "#/geografia", a: "#/areas", e: "#/sectores", l: "#/para-leer",
+const IR_CON_G = { h: "#/principal", d: "#/todo", n: "#/sintesis", s: "#/seguimiento", g: "#/geografia", a: "#/areas", e: "#/sectores", l: "#/para-leer",
   v: "#/para-ver", c: "#/cuaderno", r: "#/repaso", f: "#/fuentes", t: "#/estado" };
-const NAVEGABLES = "li.dia-item, li.fila, details.noticia, .seguida, .lectura, .lista-profundizar > li, .hilo, .frase, .lista-compacta > li";
+const NAVEGABLES = "li.dia-item, li.fila, details.noticia, .seguida, .lectura, .lista-profundizar > li, .hilo, .frase, .lista-compacta > li, .sintesis-item";
 // Cada atajo: sus teclas, lo que va entre ellas y lo que hace.
 const ATAJOS = [
   [["Ctrl", "K"], "+", "Buscar, ir a cualquier sección o dejarle algo a Claude (también con /)"],
@@ -2904,7 +2919,7 @@ const ATAJOS = [
   [["e"], "", "Escuchar lo que tienes en pantalla; si ya suena, pausar o seguir"],
   [["x"], "", "En Principal y Todo, con \"Escoger para síntesis\" activo: escoger o soltar la noticia marcada (Esc deja de escoger)"],
   [["[", "]"], "o", "Subpestaña anterior o siguiente"],
-  [["g", "h"], "y luego", "Ir a Principal. Con g y otra letra: d Todo lo demás, l Para leer, v Para ver, c Cuaderno, r Repaso, f Fuentes, t Estado"],
+  [["g", "h"], "y luego", "Ir a Principal. Con g y otra letra: d Todo lo demás, n Síntesis, l Para leer, v Para ver, c Cuaderno, r Repaso, f Fuentes, t Estado"],
   [["1", "4"], "a", "En el Repaso, responder con la opción de ese número"],
   [["?"], "", "Esta ayuda"],
 ];
@@ -3085,16 +3100,31 @@ function notasDeBoletin(b) {
     })}</ul></details>`;
 }
 
+// Las síntesis a pedido tienen su lugar aparte del Cuaderno: la pestaña Síntesis y datos/sintesis/. Pedro
+// las pide desde Principal o Todo y Claude las escribe con /sintesis en Claude Code, sin API. Como las marcas
+// se leen de los últimos días, cada noche se copian los pedidos a datos/sintesis/pedidos.json.
+async function leerSintesis() {
+  const [copia, marcas, texto] = await Promise.all([
+    leerJSON("datos/sintesis/pedidos.json").catch(() => ({ marcas: [] })), todasLasMarcas(),
+    leerTexto("datos/sintesis/respuestas.jsonl").catch(() => "")]);
+  const respuestas = lineasPor(texto, "pedido");
+  const todas = [...new Map([...copia.marcas, ...marcas.filter((m) => m.tipo?.startsWith("sintesis") && m.id)]
+    .map((m) => [m.id, m])).values()].sort((a, b) => a.ts.localeCompare(b.ts));
+  const archivados = new Map(todas.filter((m) => m.tipo === "sintesis_archivar").map((m) => [m.pedido, m.valor !== false]));
+  return todas.filter((m) => m.tipo === "sintesis")
+    .map((m) => ({ ...m, respuestas: respuestas.get(m.id) || [], archivado: archivados.get(m.id) || false }));
+}
+
 // Las síntesis que Pedro pidió y si Claude ya las escribió, por archivo (el principal de la noticia y sus
-// otras versiones). Las pide desde Principal o Todo y las escribe Claude con /cuaderno, sin API.
+// otras versiones), para marcarlas en Principal y Todo.
 let sintesisEnVista = new Map();
 let titularesEnVista = new Map(); // archivo → titular, para armar el pedido
 async function estadoDeSintesis() {
   const mapa = new Map();
-  for (const e of await leerCuaderno().catch(() => [])) {
-    if (e.clase !== "sintesis" || e.archivada) continue;
-    const estado = e.respuestas.length ? "lista" : "pedida";
-    for (const a of [e.archivo, ...(e.otras || [])]) if (a && mapa.get(a)?.estado !== "lista") mapa.set(a, { estado, entrada: e });
+  for (const p of await leerSintesis().catch(() => [])) {
+    if (p.archivado) continue;
+    const estado = p.respuestas.length ? "lista" : "pedida";
+    for (const a of [p.archivo, ...(p.otras || [])]) if (a && mapa.get(a)?.estado !== "lista") mapa.set(a, { estado, pedido: p });
   }
   return mapa;
 }
@@ -3104,11 +3134,79 @@ function marcaDeSintesis(b) {
   if (!s) return "";
   return s.estado === "lista"
     ? html`<a class="sintesis-estado lista" href="${enlaceLector({ archivo: b.a })}">Síntesis lista</a>`
-    : html`<span class="sintesis-estado" title="Claude la escribe cuando abras /cuaderno en Claude Code">Síntesis pedida</span>`;
+    : html`<span class="sintesis-estado" title="Claude la escribe cuando abras /sintesis en Claude Code">Síntesis pedida</span>`;
+}
+
+// La pestaña Síntesis: lo que falta por escribir y, debajo, las síntesis listas por día, para leerlas
+// ahí mismo sin abrir cada noticia. Cada una lleva a la noticia completa y se puede archivar.
+const VOLVER_A = { "#/todo": "Todo lo demás", "#/sintesis": "Síntesis" };
+
+function itemSintesis(p, desde) {
+  const r = p.respuestas.at(-1);
+  const versiones = (p.otras?.length || 0) + 1;
+  return html`<li class="sintesis-item${p.archivado ? " archivado" : ""}">
+    <h3 class="sintesis-titular"><a class="titular" href="${enlaceLector(p)}">${p.titulo || "La noticia"}</a></h3>
+    <p class="fila-meta">${p.fuente ? html`<span class="medio">${p.fuente}</span>` : ""}<span>${versiones > 1
+      ? `Con las ${versiones} versiones de la noticia` : "De esta pieza"}</span>${
+      desde && despues(r.ts, desde) ? html`<span class="insignia insignia-nueva">Nueva</span>` : ""}</p>
+    <div class="texto-sintesis">${seguro(markdownAHtml(r.texto))}</div>
+    <div class="sintesis-acciones">
+      <a href="${enlaceLector(p)}">Leer la noticia completa</a>
+      <button class="boton-texto" type="button" data-archivar-sintesis="${p.id}" data-valor="${String(!p.archivado)}">${
+        p.archivado ? "Sacar del archivo" : "Archivar"}</button>
+    </div>
+  </li>`;
+}
+
+async function vistaSintesis() {
+  const [pedidos, { visitas }] = await Promise.all([leerSintesis(), marcasV2()]);
+  titularesDesde = "#/sintesis";
+  const desde = visitas.get("sintesis");
+  const activos = pedidos.filter((p) => !p.archivado);
+  const porEscribir = activos.filter((p) => !p.respuestas.length);
+  // Las listas, de la más reciente a la más vieja, agrupadas por el día en que Claude las escribió.
+  const listas = activos.filter((p) => p.respuestas.length).sort((a, b) => b.respuestas.at(-1).ts.localeCompare(a.respuestas.at(-1).ts));
+  const porDia = agrupar(listas, (p) => diaEnBogota(p.respuestas.at(-1).ts));
+  const archivados = pedidos.filter((p) => p.archivado && p.respuestas.length);
+  const hoy = diaDeHoy();
+  const ayer = diaEnBogota(new Date(Date.now() - 864e5).toISOString());
+  const nombreDelDia = (dia) => (dia === hoy ? "Hoy" : dia === ayer ? "Ayer" : fechaLarga(dia));
+  pintar(html`
+    <header class="encabezado-vista">
+      <h1>Síntesis</h1>
+      <p class="meta">Las noticias que escoges en <a href="#/principal">Principal</a> o en <a href="#/todo">Todo</a> con
+        «Escoger para síntesis». Claude las escribe cuando abres <strong>/sintesis</strong> en Claude Code, sin gastar API.</p>
+    </header>
+    ${porEscribir.length ? html`<section class="bloque-sintesis">
+      ${rotulo("Por escribir", "Claude las escribe en la próxima sesión de /sintesis", porEscribir.length)}
+      <ol class="filas">${porEscribir.map((p) => html`<li class="fila">
+        <div class="fila-titular"><a class="titular" href="${enlaceLector(p)}">${p.titulo || "La noticia"}</a></div>
+        <div class="fila-meta">${p.fuente ? html`<span class="medio">${p.fuente}</span>` : ""}<span>${
+          p.otras?.length ? `${p.otras.length + 1} versiones` : "Una pieza"}</span><span>Pedida ${fechaLarga(p.ts, true)}</span></div>
+      </li>`)}</ol>
+    </section>` : ""}
+    ${[...porDia].map(([dia, lista]) => html`<section class="bloque-sintesis">
+      ${rotulo(nombreDelDia(dia), "", lista.length)}
+      <ol class="lista-sintesis">${lista.map((p) => itemSintesis(p, desde))}</ol>
+    </section>`)}
+    ${!pedidos.length ? html`<p class="nota vacio-sintesis">Todavía no has pedido síntesis. En <a href="#/principal">Principal</a>
+      o en <a href="#/todo">Todo</a>, toca «Escoger para síntesis», marca las noticias que quieras y toca «Pedir síntesis».</p>` : ""}
+    ${archivados.length ? html`<details class="mas"><summary>Archivadas (${archivados.length})</summary>
+      <ol class="lista-sintesis">${archivados.map((p) => itemSintesis(p))}</ol></details>` : ""}
+  `);
+  contenido.onclick = (evento) => {
+    const boton = evento.target.closest("[data-archivar-sintesis]");
+    if (!boton) return;
+    const valor = boton.dataset.valor === "true";
+    marcar({ tipo: "sintesis_archivar", pedido: boton.dataset.archivarSintesis, valor });
+    avisar(valor ? "Archivada" : "Salió del archivo");
+    vistaSintesis();
+  };
+  marcarVisita("sintesis");
 }
 
 // "Escoger para síntesis": pone una casilla en cada noticia; las escogidas se piden de una vez y quedan en
-// el Cuaderno. Mientras se escoge, tocar una noticia la marca en vez de abrirla; los desplegables se abren igual.
+// la pestaña Síntesis. Mientras se escoge, tocar una noticia la marca en vez de abrirla; los desplegables se abren igual.
 const FILAS_ESCOGIBLES = "li.fila, li.dia-item";
 const archivoDeFila = (li) => decodeURIComponent((li.querySelector(":scope > .titular, :scope > .fila-titular > .titular")
   ?.getAttribute("href") || "").replace(/^#\/leer\//, ""));
@@ -3194,11 +3292,12 @@ function activarEscoger(contenedor) {
   pedir.addEventListener("click", () => {
     const lista = [...escogidas].map((a) => titularesEnVista.get(a)).filter(Boolean);
     for (const b of lista) {
-      marcar({ tipo: "cuaderno", clase: "sintesis", texto: "Síntesis de esta noticia", archivo: b.a, titulo: b.t,
+      marcar({ tipo: "sintesis", archivo: b.a, titulo: b.t, fuente: b.f,
         ...(b.otras?.length ? { otras: b.otras.map((o) => o.a) } : {}) });
     }
     salir();
-    avisar(`${lista.length === 1 ? "Pediste 1 síntesis" : `Pediste ${lista.length} síntesis`}. Claude las escribe cuando abras /cuaderno en Claude Code.`);
+    avisar(`${lista.length === 1 ? "Pediste 1 síntesis" : `Pediste ${lista.length} síntesis`}. Claude las escribe cuando abras /sintesis en Claude Code.`,
+      { texto: "Ver Síntesis", hacer: () => { location.hash = "#/sintesis"; } });
     repintarVista();
   });
   // Con el teclado: x marca la noticia señalada con j/k; Esc deja de escoger.
@@ -3410,6 +3509,7 @@ async function vistaTodo() {
 const VISTAS = {
   principal: vistaPrincipal,
   todo: vistaTodo,
+  sintesis: vistaSintesis,
   hoy: vistaHoyV2,
   buscar: vistaBuscar,
   repaso: vistaRepaso,
