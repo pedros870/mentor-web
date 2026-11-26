@@ -2917,7 +2917,7 @@ const ATAJOS = [
   [["s"], "", "Seguir o soltar la historia marcada"],
   [["p"], "", "Preguntarle a Claude sobre la historia marcada, o sobre lo que tienes abierto"],
   [["e"], "", "Escuchar lo que tienes en pantalla; si ya suena, pausar o seguir"],
-  [["x"], "", "En Principal y Todo, con \"Escoger para síntesis\" activo: escoger o soltar la noticia marcada (Esc deja de escoger)"],
+  [["x"], "", "En Principal y Todo: escoger para síntesis la noticia marcada, o soltarla (Esc suelta todas)"],
   [["[", "]"], "o", "Subpestaña anterior o siguiente"],
   [["g", "h"], "y luego", "Ir a Principal. Con g y otra letra: d Todo lo demás, n Síntesis, l Para leer, v Para ver, c Cuaderno, r Repaso, f Fuentes, t Estado"],
   [["1", "4"], "a", "En el Repaso, responder con la opción de ese número"],
@@ -3205,110 +3205,93 @@ async function vistaSintesis() {
   marcarVisita("sintesis");
 }
 
-// "Escoger para síntesis": pone una casilla en cada noticia; las escogidas se piden de una vez y quedan en
-// la pestaña Síntesis. Mientras se escoge, tocar una noticia la marca en vez de abrirla; los desplegables se abren igual.
+// "Escoger para síntesis": cada noticia lleva a su izquierda una casilla (toda la franja la marca) y el titular
+// la abre, como siempre. Con una escogida aparece abajo la barra para pedirlas de una vez; quedan en la
+// pestaña Síntesis. Lo escogido se guarda mientras la página esté abierta: se puede abrir una noticia, volver,
+// o pasar de Principal a Todo, y seguir escogiendo. Se suelta al pedir o con "Soltar".
 const FILAS_ESCOGIBLES = "li.fila, li.dia-item";
 const archivoDeFila = (li) => decodeURIComponent((li.querySelector(":scope > .titular, :scope > .fila-titular > .titular")
   ?.getAttribute("href") || "").replace(/^#\/leer\//, ""));
-const botonEscoger = html`<button class="boton-secundario boton-escoger" type="button" data-escoger aria-pressed="false">Escoger para síntesis</button>`;
+const escogidas = new Map(); // archivo → titular
 
 function activarEscoger(contenedor) {
-  const boton = contenido.querySelector("[data-escoger]");
-  if (!boton || !contenedor) return;
+  if (!contenedor) return;
+  for (const a of escogidas.keys()) if (sintesisEnVista.has(a)) escogidas.delete(a); // ya se pidió
   const barra = document.createElement("div");
   barra.className = "barra-escoger";
-  barra.hidden = true;
   barra.setAttribute("role", "region");
   barra.setAttribute("aria-label", "Síntesis a pedido");
   barra.innerHTML = html`<p class="barra-escoger-texto" aria-live="polite"></p>
     <button class="boton" type="button" data-pedir>Pedir síntesis</button>
-    <button class="boton-texto" type="button" data-salir>Cancelar</button>`.texto;
+    <button class="boton-texto" type="button" data-soltar>Soltar</button>`.texto;
   contenido.append(barra);
   const texto = barra.querySelector(".barra-escoger-texto");
-  const pedir = barra.querySelector("[data-pedir]");
-  const escogidas = new Set();
-  let escogiendo = false;
   const contar = () => {
     const n = escogidas.size;
-    texto.textContent = n ? `${n === 1 ? "1 noticia escogida" : `${n} noticias escogidas`}` : "Toca las noticias que quieras sintetizar";
-    pedir.disabled = !n;
+    texto.textContent = n === 1 ? "1 noticia escogida" : `${n} noticias escogidas`;
+    barra.hidden = !n;
+    document.body.classList.toggle("con-barra-escoger", n > 0);
   };
   const alternar = (caja, valor = !caja.checked) => {
     if (caja.disabled) return;
     caja.checked = valor;
     caja.closest(FILAS_ESCOGIBLES).classList.toggle("escogida", valor);
-    if (valor) escogidas.add(caja.dataset.a);
+    if (valor) escogidas.set(caja.dataset.a, titularesEnVista.get(caja.dataset.a));
     else escogidas.delete(caja.dataset.a);
     contar();
   };
-  const entrar = () => {
-    escogiendo = true;
-    contenido.classList.add("escogiendo");
-    document.body.classList.add("con-barra-escoger");
-    boton.setAttribute("aria-pressed", "true");
-    boton.textContent = "Dejar de escoger";
-    for (const li of contenedor.querySelectorAll(FILAS_ESCOGIBLES)) {
-      const a = archivoDeFila(li);
-      const b = titularesEnVista.get(a);
-      if (!b) continue;
-      const caja = document.createElement("input");
-      caja.type = "checkbox";
-      caja.className = "escoger";
-      caja.dataset.a = a;
-      caja.setAttribute("aria-label", `Escoger para síntesis: ${b.t}`);
-      if (sintesisEnVista.has(a)) {
-        caja.disabled = true;
-        caja.title = "Ya la pediste";
-      }
-      li.prepend(caja);
-    }
-    barra.hidden = false;
+  const soltarTodas = () => {
+    escogidas.clear();
+    for (const caja of contenedor.querySelectorAll(".casilla > input:checked")) caja.checked = false;
+    for (const li of contenedor.querySelectorAll(".escogida")) li.classList.remove("escogida");
     contar();
   };
-  const salir = () => {
-    escogiendo = false;
-    contenido.classList.remove("escogiendo");
-    document.body.classList.remove("con-barra-escoger");
-    boton.setAttribute("aria-pressed", "false");
-    boton.textContent = "Escoger para síntesis";
-    for (const caja of contenedor.querySelectorAll("input.escoger")) caja.remove();
-    for (const li of contenedor.querySelectorAll(".escogida")) li.classList.remove("escogida");
-    escogidas.clear();
-    barra.hidden = true;
-  };
-  boton.addEventListener("click", () => (escogiendo ? salir() : entrar()));
-  barra.querySelector("[data-salir]").addEventListener("click", salir);
+  contenedor.classList.add("con-casillas");
+  for (const li of contenedor.querySelectorAll(FILAS_ESCOGIBLES)) {
+    const a = archivoDeFila(li);
+    const b = titularesEnVista.get(a);
+    if (!b) continue;
+    const casilla = document.createElement("label");
+    casilla.className = "casilla";
+    const caja = document.createElement("input");
+    caja.type = "checkbox";
+    caja.dataset.a = a;
+    caja.setAttribute("aria-label", `Escoger para síntesis: ${b.t}`);
+    if (sintesisEnVista.has(a)) {
+      caja.disabled = true;
+      casilla.title = "Ya pediste su síntesis";
+    } else if (escogidas.has(a)) {
+      caja.checked = true;
+      li.classList.add("escogida");
+    }
+    casilla.append(caja);
+    li.prepend(casilla);
+  }
+  contar();
+  barra.querySelector("[data-soltar]").addEventListener("click", soltarTodas);
   contenedor.addEventListener("change", (evento) => {
-    if (evento.target.matches("input.escoger")) alternar(evento.target, evento.target.checked);
+    if (evento.target.matches(".casilla > input")) alternar(evento.target, evento.target.checked);
   });
-  // Mientras se escoge, tocar la noticia la marca (los desplegables se siguen abriendo).
-  contenedor.addEventListener("click", (evento) => {
-    if (!escogiendo || evento.target.matches("input.escoger") || evento.target.closest("summary")) return;
-    const caja = evento.target.closest(FILAS_ESCOGIBLES)?.querySelector(":scope > input.escoger");
-    if (!caja) return;
-    evento.preventDefault();
-    alternar(caja);
-  }, true);
-  pedir.addEventListener("click", () => {
-    const lista = [...escogidas].map((a) => titularesEnVista.get(a)).filter(Boolean);
+  barra.querySelector("[data-pedir]").addEventListener("click", () => {
+    const lista = [...escogidas.values()];
     for (const b of lista) {
       marcar({ tipo: "sintesis", archivo: b.a, titulo: b.t, fuente: b.f,
         ...(b.otras?.length ? { otras: b.otras.map((o) => o.a) } : {}) });
     }
-    salir();
+    escogidas.clear();
+    contar();
     avisar(`${lista.length === 1 ? "Pediste 1 síntesis" : `Pediste ${lista.length} síntesis`}. Claude las escribe cuando abras /sintesis en Claude Code.`,
       { texto: "Ver Síntesis", hacer: () => { location.hash = "#/sintesis"; } });
     repintarVista();
   });
-  // Con el teclado: x marca la noticia señalada con j/k; Esc deja de escoger.
+  // Con el teclado: x escoge o suelta la noticia señalada con j/k; Esc suelta todas.
   teclasDeLaVista = (evento) => {
-    if (!escogiendo) return false;
-    if (evento.key === "Escape") {
-      salir();
+    if (evento.key === "Escape" && escogidas.size) {
+      soltarTodas();
       return true;
     }
     if (evento.key !== "x") return false;
-    const caja = contenido.querySelector(".enfocada")?.querySelector(":scope > input.escoger");
+    const caja = contenido.querySelector(".enfocada")?.querySelector(":scope > .casilla > input");
     if (caja) alternar(caja);
     return Boolean(caja);
   };
@@ -3366,7 +3349,7 @@ async function vistaPrincipal() {
     <header class="cabezal">
       <h1><span class="oculto">Principal: </span>${fechaDelDia(p.dia)}</h1>
       <p class="cabezal-dek"><span><b>${numero(titulares.length)}</b> titulares escogidos de <b>${numero(p.piezas)}</b> piezas</span>
-        <a href="#/todo">Todo lo demás <b>${numero(Math.max(0, p.piezas - piezasAqui))}</b></a>${botonEscoger}</p>
+        <a href="#/todo">Todo lo demás <b>${numero(Math.max(0, p.piezas - piezasAqui))}</b></a></p>
     </header>
     <div class="portada">
       ${lead ? html`<section class="bloque bloque-dia">
@@ -3415,7 +3398,7 @@ async function vistaTodo() {
     <header class="cabezal">
       <h1>Todo lo demás</h1>
       <p class="cabezal-dek"><span>${fechaDelDia(t.dia)}: <b>${numero(total)}</b> titulares en ${t.secciones.length} secciones</span>
-        <a href="#/principal">Volver a Principal</a>${botonEscoger}</p>
+        <a href="#/principal">Volver a Principal</a></p>
     </header>
     <div class="todo">
       <nav class="indice" aria-label="Secciones">
@@ -3614,8 +3597,7 @@ async function enrutar() {
   contenido.onchange = null;
   paraEscuchar = null;
   teclasDeLaVista = null;
-  contenido.classList.remove("escogiendo"); // el modo de escoger para síntesis es de cada vista
-  document.body.classList.remove("con-barra-escoger");
+  document.body.classList.remove("con-barra-escoger"); // la barra de las síntesis escogidas es de Principal y Todo
   historiasEnVista.clear();
   for (const dialogo of document.querySelectorAll("dialog[open]")) dialogo.close();
   menuSeleccion.hidden = true;

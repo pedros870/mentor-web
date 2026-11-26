@@ -1937,28 +1937,36 @@ a.sintesis-estado.lista::before { background: currentColor; }
 a.sintesis-estado.lista:hover { color: var(--acento-fuerte); text-decoration: underline; }
 .fila-titular > .sintesis-estado { margin-left: var(--e2); }
 
-/* Escoger para síntesis: una casilla a la izquierda de cada noticia y la escogida resaltada. */
-.cabezal-dek .boton-escoger { padding: 0.3rem 0.75rem; font-size: var(--t-meta); }
-.escogiendo li.fila, .escogiendo li.dia-item { position: relative; padding-left: 2rem; cursor: pointer; }
-input.escoger {
+/* Escoger para síntesis: una casilla a la izquierda de cada noticia, siempre a la vista. Toda la franja
+   izquierda de la fila la marca (en el celular es más fácil de tocar); el titular sigue abriendo la noticia. */
+.con-casillas li.fila, .con-casillas li.dia-item { position: relative; padding-left: 2rem; }
+.casilla {
   position: absolute;
-  left: 0.3rem;
-  top: 0.85rem;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2rem;
+  padding: 0.85rem 0 0 0.3rem;
+  cursor: pointer;
+}
+.casilla > input {
+  display: block;
   width: 1.05rem;
   height: 1.05rem;
   margin: 0;
   accent-color: var(--acento);
   cursor: pointer;
 }
-input.escoger:disabled { cursor: not-allowed; opacity: 0.5; }
-.filas > .fila:first-child > input.escoger { top: 0.3rem; }
-.dia-item > input.escoger { top: 1.05rem; }
-.dia-lead > input.escoger, .dia-lead + .dia-segunda > input.escoger { top: 0.55rem; }
-.fila.densa > input.escoger { top: 0.5rem; }
-.escogiendo li.escogida { background: var(--resalte); box-shadow: inset 3px 0 0 var(--acento); }
+.casilla > input:disabled { cursor: not-allowed; opacity: 0.45; }
+.casilla:has(> input:disabled) { cursor: not-allowed; }
+.filas > .fila:not(.densa):first-child > .casilla { padding-top: 0.3rem; }
+.dia-item > .casilla { padding-top: 1.05rem; }
+.dia-lead > .casilla, .dia-lead + .dia-segunda > .casilla { padding-top: 0.55rem; }
+.fila.densa > .casilla { padding-top: 0.5rem; }
+li.escogida { background: var(--resalte); box-shadow: inset 3px 0 0 var(--acento); }
 @media (min-width: 960px) {
-  .escogiendo li.fila.densa { padding-left: calc(var(--e3) + 2rem); }
-  .fila.densa > input.escoger { left: calc(var(--e3) + 0.3rem); }
+  .con-casillas li.fila.densa { padding-left: calc(var(--e3) + 2rem); }
+  .fila.densa > .casilla { left: var(--e3); }
 }
 
 .barra-escoger {
