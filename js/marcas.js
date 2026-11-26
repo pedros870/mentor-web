@@ -99,11 +99,14 @@ async function leerArchivo(ruta) {
   return { texto: deBase64(datos.content), sha: datos.sha };
 }
 
-async function agregarLineas(ruta, lineas) {
+// Cuando en el envío va un pedido de síntesis, el mensaje lo dice: eso lanza en GitHub la tarea que la
+// escribe con la API (sintesis.yml), y las demás marcas no la lanzan.
+async function agregarLineas(ruta, lineas, pideSintesis = false) {
   // Si otro dispositivo o pestaña escribió en medio, GitHub responde 409 y se reintenta.
   for (let intento = 0; intento < 3; intento++) {
     const { texto, sha } = await leerArchivo(ruta);
-    const cuerpo = { message: `Marcas de Pedro (${ruta.split("/").pop()})`, content: aBase64(texto + lineas) };
+    const mensaje = `Marcas de Pedro (${ruta.split("/").pop()})${pideSintesis ? ", pide síntesis" : ""}`;
+    const cuerpo = { message: mensaje, content: aBase64(texto + lineas) };
     if (sha) cuerpo.sha = sha;
     const r = await fetch(`${API}/${config().repo}/contents/${ruta}`, {
       method: "PUT", headers: { ...cabeceras(), "Content-Type": "application/json" }, body: JSON.stringify(cuerpo),
@@ -132,7 +135,7 @@ export async function enviar() {
       porArchivo.get(ruta).push(marca);
     }
     for (const [ruta, marcas] of porArchivo) {
-      await agregarLineas(ruta, marcas.map((m) => JSON.stringify(m) + "\n").join(""));
+      await agregarLineas(ruta, marcas.map((m) => JSON.stringify(m) + "\n").join(""), marcas.some((m) => m.tipo === "sintesis"));
       // Solo se quitan de la cola las que ya quedaron guardadas.
       const enviadas = new Set(marcas.map((m) => m.id));
       guardarAlmacen(CLAVE_COLA, leerAlmacen(CLAVE_COLA, []).filter((m) => !enviadas.has(m.id)));

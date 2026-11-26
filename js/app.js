@@ -374,8 +374,8 @@ async function vistaLector(ruta) {
           fechaLarga(respuestaSintesis.ts, true)}</p>
         <div class="texto-sintesis">${seguro(markdownAHtml(respuestaSintesis.texto))}</div>
         <p class="meta">Abajo, el texto completo de ${ficha.fuente}.</p>
-      </section>` : sintesis.length ? html`<p class="sintesis-pedida">Pediste la síntesis de esta noticia: Claude la escribe cuando abras
-        <strong>/sintesis</strong> en Claude Code.</p>` : ""}
+      </section>` : sintesis.length ? html`<p class="sintesis-pedida">Pediste la síntesis de esta noticia: Claude la escribe en uno o
+        dos minutos y aparece aquí al volver a abrirla.</p>` : ""}
       <div class="cuerpo">${seguro(markdownAHtml(texto))}</div>
       <section class="valoracion">
         <button class="boton-secundario" type="button" id="leido" aria-pressed="${String(leido)}">${leido ? "✓ Leído" : "Lo leí"}</button>
@@ -2907,7 +2907,7 @@ async function vistaBuscar(consulta) {
 
 const IR_CON_G = { h: "#/principal", d: "#/todo", n: "#/sintesis", s: "#/seguimiento", g: "#/geografia", a: "#/areas", e: "#/sectores", l: "#/para-leer",
   v: "#/para-ver", c: "#/cuaderno", r: "#/repaso", f: "#/fuentes", t: "#/estado" };
-const NAVEGABLES = "li.dia-item, li.fila, details.noticia, .seguida, .lectura, .lista-profundizar > li, .hilo, .frase, .lista-compacta > li, .sintesis-item";
+const NAVEGABLES = "li.parte-punto, li.dia-item, li.fila, details.noticia, .seguida, .lectura, .lista-profundizar > li, .hilo, .frase, .lista-compacta > li, .sintesis-item";
 // Cada atajo: sus teclas, lo que va entre ellas y lo que hace.
 const ATAJOS = [
   [["Ctrl", "K"], "+", "Buscar, ir a cualquier sección o dejarle algo a Claude (también con /)"],
@@ -3101,8 +3101,9 @@ function notasDeBoletin(b) {
 }
 
 // Las síntesis a pedido tienen su lugar aparte del Cuaderno: la pestaña Síntesis y datos/sintesis/. Pedro
-// las pide desde Principal o Todo y Claude las escribe con /sintesis en Claude Code, sin API. Como las marcas
-// se leen de los últimos días, cada noche se copian los pedidos a datos/sintesis/pedidos.json.
+// las pide desde Principal o Todo y, desde el 26-nov-2026, la API (Opus) las escribe apenas llega el pedido
+// (sintesis.yml en el repositorio privado; /sintesis en Claude Code queda de respaldo). Como las marcas se
+// leen de los últimos días, cada noche se copian los pedidos a datos/sintesis/pedidos.json.
 async function leerSintesis() {
   const [copia, marcas, texto] = await Promise.all([
     leerJSON("datos/sintesis/pedidos.json").catch(() => ({ marcas: [] })), todasLasMarcas(),
@@ -3134,7 +3135,7 @@ function marcaDeSintesis(b) {
   if (!s) return "";
   return s.estado === "lista"
     ? html`<a class="sintesis-estado lista" href="${enlaceLector({ archivo: b.a })}">Síntesis lista</a>`
-    : html`<span class="sintesis-estado" title="Claude la escribe cuando abras /sintesis en Claude Code">Síntesis pedida</span>`;
+    : html`<span class="sintesis-estado" title="Claude la escribe en uno o dos minutos">Síntesis pedida</span>`;
 }
 
 // La pestaña Síntesis: lo que falta por escribir y, debajo, las síntesis listas por día, para leerlas
@@ -3175,10 +3176,10 @@ async function vistaSintesis() {
     <header class="encabezado-vista">
       <h1>Síntesis</h1>
       <p class="meta">Las noticias que escoges en <a href="#/principal">Principal</a> o en <a href="#/todo">Todo</a> con
-        «Escoger para síntesis». Claude las escribe cuando abres <strong>/sintesis</strong> en Claude Code, sin gastar API.</p>
+        la casilla de la izquierda. Claude las escribe en uno o dos minutos.</p>
     </header>
     ${porEscribir.length ? html`<section class="bloque-sintesis">
-      ${rotulo("Por escribir", "Claude las escribe en la próxima sesión de /sintesis", porEscribir.length)}
+      ${rotulo("Por escribir", "Claude las escribe en uno o dos minutos; recarga para verlas", porEscribir.length)}
       <ol class="filas">${porEscribir.map((p) => html`<li class="fila">
         <div class="fila-titular"><a class="titular" href="${enlaceLector(p)}">${p.titulo || "La noticia"}</a></div>
         <div class="fila-meta">${p.fuente ? html`<span class="medio">${p.fuente}</span>` : ""}<span>${
@@ -3190,7 +3191,7 @@ async function vistaSintesis() {
       <ol class="lista-sintesis">${lista.map((p) => itemSintesis(p, desde))}</ol>
     </section>`)}
     ${!pedidos.length ? html`<p class="nota vacio-sintesis">Todavía no has pedido síntesis. En <a href="#/principal">Principal</a>
-      o en <a href="#/todo">Todo</a>, toca «Escoger para síntesis», marca las noticias que quieras y toca «Pedir síntesis».</p>` : ""}
+      o en <a href="#/todo">Todo</a>, marca con la casilla de la izquierda las noticias que quieras y toca «Pedir síntesis».</p>` : ""}
     ${archivados.length ? html`<details class="mas"><summary>Archivadas (${archivados.length})</summary>
       <ol class="lista-sintesis">${archivados.map((p) => itemSintesis(p))}</ol></details>` : ""}
   `);
@@ -3209,8 +3210,8 @@ async function vistaSintesis() {
 // la abre, como siempre. Con una escogida aparece abajo la barra para pedirlas de una vez; quedan en la
 // pestaña Síntesis. Lo escogido se guarda mientras la página esté abierta: se puede abrir una noticia, volver,
 // o pasar de Principal a Todo, y seguir escogiendo. Se suelta al pedir o con "Soltar".
-const FILAS_ESCOGIBLES = "li.fila, li.dia-item";
-const archivoDeFila = (li) => decodeURIComponent((li.querySelector(":scope > .titular, :scope > .fila-titular > .titular")
+const FILAS_ESCOGIBLES = "li.fila, li.dia-item, li.parte-punto[data-a]";
+const archivoDeFila = (li) => li.dataset.a || decodeURIComponent((li.querySelector(":scope > .titular, :scope > .fila-titular > .titular")
   ?.getAttribute("href") || "").replace(/^#\/leer\//, ""));
 const escogidas = new Map(); // archivo → titular
 
@@ -3280,7 +3281,7 @@ function activarEscoger(contenedor) {
     }
     escogidas.clear();
     contar();
-    avisar(`${lista.length === 1 ? "Pediste 1 síntesis" : `Pediste ${lista.length} síntesis`}. Claude las escribe cuando abras /sintesis en Claude Code.`,
+    avisar(`${lista.length === 1 ? "Pediste 1 síntesis" : `Pediste ${lista.length} síntesis`}. Claude las escribe en uno o dos minutos.`,
       { texto: "Ver Síntesis", hacer: () => { location.hash = "#/sintesis"; } });
     repintarVista();
   });
@@ -3334,12 +3335,39 @@ function rotulo(nombre, nota, cuenta) {
   return html`<h2 class="rotulo"><span class="rotulo-nombre">${nombre}</span>${cuenta !== undefined ? html`<span class="rotulo-n">${numero(cuenta)}</span>` : ""}${nota ? html`<span class="rotulo-nota">${nota}</span>` : ""}</h2>`;
 }
 
+// El parte del día: cada noche Claude (Opus) lee todos los titulares y escribe lo que hay que saber, de 10 a
+// 15 puntos por tema, cada uno con las piezas que lo cuentan (parte.py, desde el 26-nov-2026). Va de primero
+// en Principal; cada punto se puede escoger para síntesis, como un titular.
+async function leerParte(dia) {
+  return leerJSON(`datos/parte/${dia.slice(0, 4)}/${dia.slice(5, 7)}/${dia.slice(8, 10)}.json`).catch(() => null);
+}
+
+function itemDelParte(punto, vistos) {
+  const [principal] = punto.piezas;
+  return html`<li class="parte-punto"${principal ? html` data-a="${principal.a}"` : ""}>
+    <p class="parte-texto">${punto.texto}</p>
+    ${principal ? html`<p class="parte-fuentes">${punto.piezas.map((b) => html`<a href="${enlaceLector({ archivo: b.a })}"
+      title="${b.t}" aria-label="${b.f}: ${b.t}" lang="${b.i || "es"}">${vistos.has(b.a) ? marcaVista : ""}${b.f}</a>`)}${marcaDeSintesis(principal)}</p>` : ""}
+  </li>`;
+}
+
+function bloqueDelParte(parte, vistos) {
+  if (!parte?.puntos?.length) return "";
+  return html`<section class="bloque-parte" aria-labelledby="titulo-parte">
+    <h2 class="rotulo" id="titulo-parte"><span class="rotulo-nombre">El parte</span><span class="rotulo-nota">Claude leyó los
+      ${numero(parte.titulares_leidos)} titulares del día y escogió lo que hay que saber</span></h2>
+    ${[...agrupar(parte.puntos, (x) => x.tema)].map(([tema, puntos]) => html`<h3 class="rotulo-menor parte-tema">${tema}</h3>
+      <ol class="parte-puntos">${puntos.map((x) => itemDelParte(x, vistos))}</ol>`)}
+  </section>`;
+}
+
 async function vistaPrincipal() {
-  const [p, vistos, sintesis] = await Promise.all([leerTitulares("principal"), piezasAbiertas(), estadoDeSintesis()]);
+  const [[p, parte], vistos, sintesis] = await Promise.all([
+    leerTitulares("principal").then(async (p) => [p, await leerParte(p.dia)]), piezasAbiertas(), estadoDeSintesis()]);
   titularesDesde = "#/principal";
   sintesisEnVista = sintesis;
   const titulares = [...p.negocios.flatMap((s) => s.titulares), ...BLOQUES_PRINCIPAL.slice(1).flatMap((clave) => p[clave])];
-  titularesEnVista = new Map(titulares.map((b) => [b.a, b]));
+  titularesEnVista = new Map([...(parte?.puntos || []).flatMap((x) => x.piezas), ...titulares].map((b) => [b.a, b]));
   const piezasAqui = titulares.reduce((n, b) => n + 1 + (b.otras?.length || 0), 0);
   const filas = (lista, opciones) => html`<ol class="filas">${lista.map((b) => filaTitular(b, vistos, opciones))}</ol>`;
   const [lead, ...siguen] = p.del_dia;
@@ -3351,6 +3379,8 @@ async function vistaPrincipal() {
       <p class="cabezal-dek"><span><b>${numero(titulares.length)}</b> titulares escogidos de <b>${numero(p.piezas)}</b> piezas</span>
         <a href="#/todo">Todo lo demás <b>${numero(Math.max(0, p.piezas - piezasAqui))}</b></a></p>
     </header>
+    <div class="principal-cuerpo">
+    ${bloqueDelParte(parte, vistos)}
     <div class="portada">
       ${lead ? html`<section class="bloque bloque-dia">
         ${rotulo("Lo del día", "Lo que cuentan tres medios o más, de más a menos")}
@@ -3373,10 +3403,11 @@ async function vistaPrincipal() {
         </section>` : ""}
       </div>` : ""}
     </div>
+    </div>
     <p class="nota pie-vista">Hoy, Geografía, Áreas, Sectores y Seguimiento quedaron como estaban el 20 de noviembre,
       cuando se pausó la parte con Claude. <a href="#/hoy">Ver lo anterior</a></p>
   `);
-  activarEscoger(contenido.querySelector(".portada"));
+  activarEscoger(contenido.querySelector(".principal-cuerpo"));
   marcarVisita("principal");
 }
 
@@ -3384,11 +3415,15 @@ async function vistaTodo() {
   const [t, vistos, sintesis] = await Promise.all([leerTitulares("todo"), piezasAbiertas(), estadoDeSintesis()]);
   titularesDesde = "#/todo";
   sintesisEnVista = sintesis;
-  titularesEnVista = new Map(t.secciones.flatMap((s) => s.titulares.map((b) => [b.a, b])));
+  titularesEnVista = new Map(t.secciones.flatMap((s) => [...s.titulares, ...(s.plegados || [])].map((b) => [b.a, b])));
   // La primera vez, Colombia abierta; después, las que dejaste abiertas.
   let abiertas = new Set(["Colombia"]);
   try { abiertas = new Set(JSON.parse(localStorage.getItem(CLAVE_TODO_ABIERTAS)) ?? ["Colombia"]); } catch { /* sin almacenamiento */ }
   const total = t.secciones.reduce((n, s) => n + s.titulares.length, 0);
+  // Desde el 26-nov-2026, en las secciones de la prensa de cada país lo que cuenta un solo medio llega aparte
+  // (titulares.py, "plegados"): va al final de la sección, plegado. El filtro también lo busca.
+  const plegados = t.secciones.reduce((n, s) => n + (s.plegados?.length || 0), 0);
+  const filasDensas = (lista) => lista.map((b, i) => filaTitular(b, vistos, { densa: true, repite: i > 0 && lista[i - 1].f === b.f }));
   const mayor = Math.max(1, ...t.secciones.map((s) => s.titulares.length));
   const idDe = (nombre) => `seccion-${slugV2(nombre)}`;
   // En el índice, una barra por sección: dónde está el grueso del día.
@@ -3397,7 +3432,8 @@ async function vistaTodo() {
   pintar(html`
     <header class="cabezal">
       <h1>Todo lo demás</h1>
-      <p class="cabezal-dek"><span>${fechaDelDia(t.dia)}: <b>${numero(total)}</b> titulares en ${t.secciones.length} secciones</span>
+      <p class="cabezal-dek"><span>${fechaDelDia(t.dia)}: <b>${numero(total)}</b> titulares en ${t.secciones.length} secciones${
+        plegados ? html`, y otros <b>${numero(plegados)}</b> plegados, de un solo medio` : ""}</span>
         <a href="#/principal">Volver a Principal</a></p>
     </header>
     <div class="todo">
@@ -3412,7 +3448,10 @@ async function vistaTodo() {
       <div class="todo-secciones" id="secciones-todo">${t.secciones.map((s) => html`<details class="seccion-todo" id="${idDe(s.seccion)}"
         data-seccion="${s.seccion}" data-total="${s.titulares.length}"${abiertas.has(s.seccion) ? seguro(" open") : ""}>
         <summary>${rotulo(s.seccion, medios(s) === 1 ? "1 medio" : `${medios(s)} medios`, s.titulares.length)}</summary>
-        <ol class="filas">${s.titulares.map((b, i) => filaTitular(b, vistos, { densa: true, repite: i > 0 && s.titulares[i - 1].f === b.f }))}</ol>
+        ${s.titulares.length ? html`<ol class="filas">${filasDensas(s.titulares)}</ol>` : ""}
+        ${s.plegados?.length ? html`<details class="plegados"><summary>${s.plegados.length === 1 ? "Otro que cuenta un solo medio"
+          : `Otros ${numero(s.plegados.length)} que cuenta un solo medio`}</summary>
+          <ol class="filas">${filasDensas(s.plegados)}</ol></details>` : ""}
       </details>`)}
         <p class="nota" id="sin-coincidencias" hidden>Nada coincide con el filtro. Prueba con otra palabra o bórralo con Esc.</p>
       </div>
@@ -3450,9 +3489,13 @@ async function vistaTodo() {
   for (const s of caja.querySelectorAll(".seccion-todo")) observador.observe(s);
   let items = null;
   const filtro = document.getElementById("filtro-todo");
+  const pliegues = [...caja.querySelectorAll(".plegados")];
+  for (const p of pliegues) p.dataset.texto = p.querySelector("summary").textContent;
   filtro.addEventListener("input", () => {
     items ??= [...caja.querySelectorAll("li.fila")].map((li) => [li, sinTildes(li.textContent), li.querySelector(".medio").textContent, li.parentElement]);
     const consulta = sinTildes(filtro.value.trim());
+    // Al empezar a filtrar se recuerda qué plegados tenías abiertos, para dejarlos así al borrar el filtro.
+    if (consulta && !filtrando) for (const p of pliegues) p.dataset.abierto = p.open ? "1" : "";
     filtrando = Boolean(consulta);
     contenido.querySelector(".todo").classList.toggle("filtrando", filtrando);
     // El medio se escribe una vez por tramo de titulares visibles: si el filtro esconde el primero, lo muestra el siguiente.
@@ -3477,6 +3520,19 @@ async function vistaTodo() {
       boton.querySelector(".indice-barra rect").setAttribute("width", Math.max(1.5, (100 * n) / mayor).toFixed(1));
       boton.parentElement.hidden = filtrando && !visibles;
       alguna ||= visibles > 0;
+    }
+    for (const p of pliegues) {
+      if (filtrando) {
+        const coinciden = p.querySelectorAll("li.fila:not([hidden])").length;
+        p.open = coinciden > 0;
+        p.hidden = !coinciden;
+        p.querySelector("summary").textContent = `${coinciden === 1 ? "Coincide 1" : `Coinciden ${numero(coinciden)}`} de los que cuenta un solo medio`;
+      } else if ("abierto" in p.dataset) {
+        p.open = Boolean(p.dataset.abierto);
+        p.hidden = false;
+        delete p.dataset.abierto;
+        p.querySelector("summary").textContent = p.dataset.texto;
+      }
     }
     document.getElementById("sin-coincidencias").hidden = !filtrando || alguna;
   });

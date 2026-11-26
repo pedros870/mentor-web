@@ -1770,6 +1770,21 @@ details.otras { border-top: 0; padding: 0; margin: var(--e1) 0 0; }
 }
 .pie-vista { margin: var(--e8) 0 0; padding-top: var(--e3); border-top: 1px solid var(--borde); font-size: var(--t-meta); }
 
+/* El parte: lo que Claude escogió de todos los titulares del día. Va antes de todo, en prosa y a una medida
+   cómoda de lectura; la raya del lápiz azul a la izquierda es la de lo que escribe Claude, como en las síntesis. */
+.bloque-parte { max-width: 46rem; margin: 0 0 var(--e7); }
+.bloque-parte > .rotulo { margin-bottom: 0; }
+.parte-tema { justify-content: flex-start; margin: var(--e4) 0 var(--e1); color: var(--texto-medio); }
+.parte-puntos { list-style: none; margin: 0; padding: 0 0 0 var(--e4); border-left: 2px solid var(--acento); }
+.parte-punto { padding: var(--e2) 0; }
+.parte-punto + .parte-punto { border-top: 1px solid var(--borde); }
+.parte-texto { margin: 0; font-family: var(--serif); font-size: 1.0625rem; line-height: 1.55; text-wrap: pretty; overflow-wrap: break-word; }
+.parte-fuentes { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.15rem var(--e3); margin: 0.3rem 0 0; font-size: var(--t-meta); }
+.parte-fuentes a { color: var(--acento); font-weight: 500; text-decoration: none; }
+.parte-fuentes a:hover { color: var(--acento-fuerte); text-decoration: underline; }
+.parte-fuentes .marca-vista { margin-right: 0.2em; }
+@media (max-width: 759px) { .parte-puntos { padding-left: var(--e1); } }
+
 /* Todo lo demás: el índice al lado (arriba en el celular) y una línea por titular, con el medio una
    sola vez por tramo, como en un directorio. */
 .todo { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--e5); }
@@ -1843,6 +1858,33 @@ details.otras { border-top: 0; padding: 0; margin: var(--e1) 0 0; }
 .seccion-todo > summary:hover .rotulo-nombre { color: var(--acento-fuerte); }
 .seccion-todo:not([open]) .rotulo { border-top-color: var(--borde); }
 .todo.filtrando .seccion-todo .rotulo-nota { visibility: hidden; }
+
+/* Lo que cuenta un solo medio en las secciones de la prensa de cada país: plegado al final de la sección,
+   con el mismo pliegue de "Los otros titulares". */
+.plegados { margin: var(--e1) 0 var(--e3); }
+.plegados > summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: var(--e2) 0;
+  font: 500 var(--t-ui)/1.4 var(--sans);
+  color: var(--texto-medio);
+  cursor: pointer;
+  transition: color var(--rapido);
+}
+.plegados > summary::-webkit-details-marker { display: none; }
+.plegados > summary::before {
+  content: "";
+  width: 0.42rem;
+  height: 0.42rem;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform var(--rapido);
+}
+.plegados[open] > summary::before { transform: rotate(45deg) translate(-1px, -1px); }
+.plegados > summary:hover, .plegados[open] > summary { color: var(--acento); }
 .filas > .fila[hidden] { display: none; } /* gana a la grilla de las filas densas */
 
 /* Una fila densa: en el celular, el medio encima de su tramo y los minutos a la derecha. */
@@ -1939,7 +1981,7 @@ a.sintesis-estado.lista:hover { color: var(--acento-fuerte); text-decoration: un
 
 /* Escoger para síntesis: una casilla a la izquierda de cada noticia, siempre a la vista. Toda la franja
    izquierda de la fila la marca (en el celular es más fácil de tocar); el titular sigue abriendo la noticia. */
-.con-casillas li.fila, .con-casillas li.dia-item { position: relative; padding-left: 2rem; }
+.con-casillas li.fila, .con-casillas li.dia-item, .con-casillas li.parte-punto { position: relative; padding-left: 2rem; }
 .casilla {
   position: absolute;
   left: 0;
@@ -1963,6 +2005,7 @@ a.sintesis-estado.lista:hover { color: var(--acento-fuerte); text-decoration: un
 .dia-item > .casilla { padding-top: 1.05rem; }
 .dia-lead > .casilla, .dia-lead + .dia-segunda > .casilla { padding-top: 0.55rem; }
 .fila.densa > .casilla { padding-top: 0.5rem; }
+.parte-punto > .casilla { padding-top: 0.85rem; }
 li.escogida { background: var(--resalte); box-shadow: inset 3px 0 0 var(--acento); }
 @media (min-width: 960px) {
   .con-casillas li.fila.densa { padding-left: calc(var(--e3) + 2rem); }
